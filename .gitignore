@@ -16,6 +16,7 @@ app/build/
 !BSD-Campus-debug.apk
 !baccha/
 !baccha/**
+!baccha/*.apk
 *.aab
 *.ap_
 *.dex

@@ -247,6 +247,7 @@ private fun AuthenticatedCampusHost(
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
     val typingMap by viewModel.typingMap.collectAsStateWithLifecycle()
+    val chatPreferences by viewModel.chatPreferences.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val analytics by viewModel.analytics.collectAsStateWithLifecycle()
     val activeTab by viewModel.activeTab.collectAsStateWithLifecycle()
@@ -652,6 +653,8 @@ private fun AuthenticatedCampusHost(
                                             messages = messages,
                                             notes = visibleNotes,
                                             typingMap = typingMap,
+                                            chatPreferences = chatPreferences,
+                                            blockedUserIds = privateInfo?.blockedUserIds.orEmpty().toSet(),
                                             activeChatUserId = activeChatUserId,
                                             onSelectChatUser = { viewModel.openDirectChat(it) },
                                             onClearChatUser = { viewModel.clearActiveChat() },
@@ -668,6 +671,12 @@ private fun AuthenticatedCampusHost(
                                                 viewModel.saveNote(text, color, track, startSec, onDone)
                                             },
                                             onDeleteNote = { onDone -> viewModel.deleteNote(onDone) },
+                                            onSetNickname = { peerId, nick -> viewModel.setChatNickname(peerId, nick) },
+                                            onSetBackground = { peerId, preset, img -> viewModel.setChatBackground(peerId, preset, img) },
+                                            onToggleBlockUser = { targetId -> viewModel.toggleBlockUser(targetId) },
+                                            onSubmitChatReport = { peer, reason, details, threadMsgs ->
+                                                viewModel.submitChatReport(peer, reason, details, threadMsgs)
+                                            },
                                             onShowToast = { viewModel.showToast(it) }
                                         )
                                         CampusTab.ACTIVITY -> ActivityScreen(

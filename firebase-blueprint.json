@@ -197,21 +197,36 @@
     },
     "CampusReport": {
       "title": "CampusReport",
-      "description": "Moderation report ticket for posts, comments, or users",
+      "description": "Moderation report ticket for posts, reels, comments, chats, or users",
       "type": "object",
       "properties": {
         "reporterId": { "type": "string" },
-        "targetType": { "type": "string", "enum": ["post", "comment", "user"] },
+        "targetType": { "type": "string", "enum": ["post", "reel", "comment", "user", "chat", "app"] },
         "targetId": { "type": "string" },
         "targetSummary": { "type": "string" },
         "reason": { "type": "string" },
         "details": { "type": "string" },
+        "reportedMessages": { "type": "array" },
         "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] },
         "actionTaken": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["reporterId", "targetType", "targetId", "targetSummary", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "ChatPreference": {
+      "title": "ChatPreference",
+      "description": "Per-conversation custom nickname and background theme/wallpaper scoped to owner",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "peerId": { "type": "string" },
+        "nickname": { "type": "string" },
+        "backgroundPreset": { "type": "string" },
+        "backgroundImage": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "peerId", "updatedAt"]
     },
     "MediaAsset": {
       "title": "MediaAsset",
@@ -404,6 +419,10 @@
     "/users/{userId}/private/{docId}": {
       "schema": { "$ref": "#/entities/UserPrivateInfo" },
       "description": "Private PII and user settings isolated per user"
+    },
+    "/users/{userId}/chat_preferences/{peerId}": {
+      "schema": { "$ref": "#/entities/ChatPreference" },
+      "description": "Per-peer custom chat nicknames and backgrounds isolated per user"
     },
     "/campus_follows/{followId}": {
       "schema": { "$ref": "#/entities/CampusFollow" },

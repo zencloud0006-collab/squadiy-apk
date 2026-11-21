@@ -389,17 +389,22 @@ data class CampusNotification(
 data class CampusReport(
     @DocumentId val id: String = "",
     val reporterId: String = "",
-    val targetType: String = "post", // "post" | "comment" | "user"
+    val targetType: String = "post", // "post" | "reel" | "comment" | "user" | "chat" | "app"
     val targetId: String = "",
     val targetSummary: String = "",
     val reason: String = "",
     val details: String? = null,
+    val reportedMessages: List<String> = emptyList(),
     val status: String = "pending", // "pending" | "resolved" | "dismissed"
     val actionTaken: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
     fun toCreateMap(): Map<String, Any> {
+        val cleanMessages = reportedMessages
+            .map { it.trim().take(400) }
+            .filter { it.isNotBlank() }
+            .take(5)
         val raw = mutableMapOf<String, Any?>(
             "reporterId" to reporterId,
             "targetType" to targetType,
@@ -407,6 +412,7 @@ data class CampusReport(
             "targetSummary" to targetSummary,
             "reason" to reason,
             "details" to details,
+            "reportedMessages" to cleanMessages.takeIf { it.isNotEmpty() },
             "status" to status,
             "actionTaken" to actionTaken,
             "createdAt" to FieldValue.serverTimestamp(),
@@ -754,6 +760,53 @@ data class AppUpdateConfig(
             "releaseNotes" to releaseNotes.trim().take(1000),
             "isMandatory" to isMandatory,
             "updatedBy" to updatedByUid.take(128),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        @Suppress("UNCHECKED_CAST")
+        return raw.filterValues { it != null } as Map<String, Any>
+    }
+}
+
+enum class ChatBackgroundPreset(
+    val key: String,
+    val label: String,
+    val colorsArgb: List<Long>
+) {
+    DEFAULT("default", "Default", emptyList()),
+    MIDNIGHT("midnight", "Midnight", listOf(0xFF0F172AL, 0xFF1E1B4BL)),
+    AURORA("aurora", "Aurora", listOf(0xFF064E3BL, 0xFF0F172AL, 0xFF312E81L)),
+    ROSE_DUSK("rose", "Rose Dusk", listOf(0xFF4C0519L, 0xFF831843L, 0xFF3B0764L)),
+    EMERALD("emerald", "Emerald", listOf(0xFF022C22L, 0xFF115E59L)),
+    SUNSET("sunset", "Sunset", listOf(0xFF7C2D12L, 0xFF9D174DL, 0xFF4C1D95L)),
+    SKY_SOFT("sky", "Soft Sky", listOf(0xFFE0F2FEL, 0xFFEDE9FEL)),
+    LAVENDER("lavender", "Lavender", listOf(0xFFF3E8FFL, 0xFFFCE7F3L));
+
+    val isDarkPreset: Boolean
+        get() = this != DEFAULT && this != SKY_SOFT && this != LAVENDER
+
+    companion object {
+        fun fromKey(key: String?): ChatBackgroundPreset =
+            entries.firstOrNull { it.key == key } ?: DEFAULT
+    }
+}
+
+@IgnoreExtraProperties
+data class ChatPreference(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val peerId: String = "",
+    val nickname: String? = null,
+    val backgroundPreset: String = ChatBackgroundPreset.DEFAULT.key,
+    val backgroundImage: String? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun toWriteMap(): Map<String, Any> {
+        val raw = mutableMapOf<String, Any?>(
+            "userId" to userId,
+            "peerId" to peerId,
+            "nickname" to nickname?.trim()?.takeIf { it.isNotBlank() }?.take(40),
+            "backgroundPreset" to ChatBackgroundPreset.fromKey(backgroundPreset).key,
+            "backgroundImage" to backgroundImage?.trim()?.takeIf { it.isNotBlank() }?.take(350_000),
             "updatedAt" to FieldValue.serverTimestamp()
         )
         @Suppress("UNCHECKED_CAST")

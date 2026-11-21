@@ -200,13 +200,23 @@ service cloud.firestore {
              isValidTimestamp(data.createdAt);
     }
 
+    function isValidChatPreference(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.peerId is string && data.peerId.size() >= 1 && data.peerId.size() <= 128 &&
+             (!('nickname' in data) || (data.nickname is string && data.nickname.size() <= 40)) &&
+             (!('backgroundPreset' in data) || data.backgroundPreset in ['default', 'midnight', 'aurora', 'rose', 'emerald', 'sunset', 'sky', 'lavender']) &&
+             (!('backgroundImage' in data) || (data.backgroundImage is string && data.backgroundImage.size() <= 350000)) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
     function isValidReport(data) {
       return data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
-             data.targetType in ['post', 'reel', 'comment', 'user', 'app'] &&
+             data.targetType in ['post', 'reel', 'comment', 'user', 'chat', 'app'] &&
              data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
              data.targetSummary is string && data.targetSummary.size() <= 300 &&
              data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 160 &&
-             (!('details' in data) || (data.details is string && data.details.size() <= 1000)) &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 2500)) &&
+             (!('reportedMessages' in data) || (data.reportedMessages is list && data.reportedMessages.size() <= 5 && (data.reportedMessages.size() == 0 || (data.reportedMessages[0] is string && data.reportedMessages[0].size() <= 400)))) &&
              data.status in ['pending', 'resolved', 'dismissed'] &&
              (!('actionTaken' in data) || (data.actionTaken is string && data.actionTaken.size() <= 160)) &&
              isValidTimestamp(data.createdAt) &&
@@ -433,6 +443,22 @@ service cloud.firestore {
                        isValidUserPrivateInfo(incoming());
 
       allow delete: if isSignedIn() && isValidId(userId) && isValidId(docId) && (request.auth.uid == userId || isAdmin());
+    }
+
+    match /users/{userId}/chat_preferences/{peerId} {
+      allow get: if isSignedIn() && isValidId(userId) && isValidId(peerId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+      allow create, update: if isSignedIn() &&
+                               isValidId(userId) &&
+                               isValidId(peerId) &&
+                               request.auth.uid == userId &&
+                               incoming().userId == userId &&
+                               incoming().peerId == peerId &&
+                               incoming().keys().hasAll(['userId', 'peerId', 'updatedAt']) &&
+                               isValidChatPreference(incoming());
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(peerId) && (request.auth.uid == userId || isAdmin());
     }
 
     match /campus_follows/{followId} {

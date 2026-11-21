@@ -25,6 +25,8 @@ import com.bsdcampus.app.model.CampusReport
 import com.bsdcampus.app.model.CampusStory
 import com.bsdcampus.app.model.CampusTab
 import com.bsdcampus.app.model.CampusUser
+import com.bsdcampus.app.model.ChatBackgroundPreset
+import com.bsdcampus.app.model.ChatPreference
 import com.bsdcampus.app.model.ConversationSummary
 import com.bsdcampus.app.model.DirectMessage
 import com.bsdcampus.app.model.HighlightMediaItem
@@ -56,6 +58,9 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 class CampusViewModel(
@@ -215,17 +220,21 @@ class CampusViewModel(
     val postsState: StateFlow<UiState<List<CampusPost>>> = combine(
         livePostsState,
         _serverRefreshPosts,
-        pendingDeletedPostIds
-    ) { live, serverOverride, deletedIds ->
+        pendingDeletedPostIds,
+        privateInfo
+    ) { live, serverOverride, deletedIds, priv ->
+        val blockedIds = priv?.blockedUserIds.orEmpty().toSet()
         val raw = if (serverOverride != null) UiState.Success(serverOverride) else live
-        if (deletedIds.isEmpty() || raw !is UiState.Success) {
+        if (raw !is UiState.Success || (deletedIds.isEmpty() && blockedIds.isEmpty())) {
             raw
         } else {
-            UiState.Success(raw.data.filterNot { deletedIds.contains(it.id) })
+            UiState.Success(
+                raw.data.filterNot { deletedIds.contains(it.id) || blockedIds.contains(it.authorId) }
+            )
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
-    val reelsState: StateFlow<UiState<List<CampusReel>>> = repository.observeReels()
+    private val rawReelsState: StateFlow<UiState<List<CampusReel>>> = repository.observeReels()
         .map<List<CampusReel>, UiState<List<CampusReel>>> { UiState.Success(it) }
         .catch { err ->
             val firestoreErr = unwrapFirestoreError(err)
@@ -233,6 +242,18 @@ class CampusViewModel(
             emit(UiState.Error((firestoreErr ?: err).message ?: "Failed to load reels"))
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
+
+    val reelsState: StateFlow<UiState<List<CampusReel>>> = combine(
+        rawReelsState,
+        privateInfo
+    ) { reelsUi, priv ->
+        val blockedIds = priv?.blockedUserIds.orEmpty().toSet()
+        if (reelsUi is UiState.Success && blockedIds.isNotEmpty()) {
+            UiState.Success(reelsUi.data.filterNot { blockedIds.contains(it.authorId) })
+        } else {
+            reelsUi
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), UiState.Loading)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val rawStories: StateFlow<List<CampusStory>> = _feedRefreshGeneration
@@ -247,13 +268,15 @@ class CampusViewModel(
     // All non-expired active stories indexed by authorId (used when viewing public user profiles directly)
     val storiesByAuthorId: StateFlow<Map<String, StoryGroup>> = combine(
         rawStories,
-        allUsersState
-    ) { storyList, usersState ->
+        allUsersState,
+        privateInfo
+    ) { storyList, usersState, priv ->
+        val blockedIds = priv?.blockedUserIds.orEmpty().toSet()
         val users = (usersState as? UiState.Success)?.data.orEmpty()
         val userById = users.associateBy { it.uid }
         val now = System.currentTimeMillis()
         storyList
-            .filter { story -> !story.isExpired(now) }
+            .filter { story -> !story.isExpired(now) && !blockedIds.contains(story.authorId) }
             .groupBy { it.authorId }
             .mapNotNull { (authorId, authorStories) ->
                 val author = userById[authorId] ?: return@mapNotNull null
@@ -297,8 +320,10 @@ class CampusViewModel(
     // Mutual-follow privacy for Chat Notes: show only own note OR mutual followers (I follow them & they follow me)
     val visibleNotes: StateFlow<List<CampusNote>> = combine(
         rawNotes,
-        allUsersState
-    ) { notesList, usersState ->
+        allUsersState,
+        privateInfo
+    ) { notesList, usersState, priv ->
+        val blockedIds = priv?.blockedUserIds.orEmpty().toSet()
         val users = (usersState as? UiState.Success)?.data.orEmpty()
         val userById = users.associateBy { it.uid }
         val me = userById[currentUserId] ?: return@combine emptyList()
@@ -306,6 +331,7 @@ class CampusViewModel(
         notesList.filter { note ->
             if (note.isExpired(now)) return@filter false
             if (note.authorId == currentUserId) return@filter true
+            if (blockedIds.contains(note.authorId)) return@filter false
             val author = userById[note.authorId] ?: return@filter false
             if (author.isSuspended) return@filter false
             me.following.contains(note.authorId) && me.followers.contains(note.authorId)
@@ -346,6 +372,10 @@ class CampusViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     val typingMap: StateFlow<Map<String, Boolean>> = repository.observeTypingStatus(currentUserId)
+        .catch { emit(emptyMap()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyMap())
+
+    val chatPreferences: StateFlow<Map<String, ChatPreference>> = repository.observeChatPreferences(currentUserId)
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyMap())
 
@@ -1056,6 +1086,11 @@ class CampusViewModel(
             showToast("Suspended accounts cannot send messages.")
             return
         }
+        val blocked = privateInfo.value?.blockedUserIds.orEmpty()
+        if (blocked.contains(recipientId)) {
+            showToast("Unblock this user to send messages.")
+            return
+        }
         viewModelScope.launch {
             val res = repository.sendMessage(
                 recipientId = recipientId,
@@ -1153,7 +1188,129 @@ class CampusViewModel(
     fun submitReport(targetType: String, targetId: String, summary: String, reason: String, details: String) {
         viewModelScope.launch {
             val res = repository.submitReport(targetType, targetId, summary, reason, details)
-            if (res.isFailure) showToast("Unable to submit report")
+            if (res.isSuccess) showToast("Report submitted to Admin")
+            else showToast("Unable to submit report")
+        }
+    }
+
+    fun setChatNickname(peerId: String, nickname: String?) {
+        val existing = chatPreferences.value[peerId]
+        val cleanNick = nickname?.trim()?.takeIf { it.isNotBlank() }?.take(40)
+        viewModelScope.launch {
+            val res = repository.saveChatPreference(
+                peerId = peerId,
+                nickname = cleanNick,
+                backgroundPreset = existing?.backgroundPreset ?: ChatBackgroundPreset.DEFAULT.key,
+                backgroundImage = existing?.backgroundImage,
+                isAdmin = isCurrentUserAdmin.value,
+                context = appContext
+            )
+            if (res.isSuccess) {
+                showToast(if (cleanNick == null) "Nickname cleared" else "Nickname saved")
+            } else {
+                showToast(res.exceptionOrNull()?.localizedMessage ?: "Unable to save nickname")
+            }
+        }
+    }
+
+    fun setChatBackground(peerId: String, presetKey: String, imageUri: String?) {
+        val existing = chatPreferences.value[peerId]
+        val cleanImage = imageUri?.trim()?.takeIf { it.isNotBlank() }
+        val cleanPreset = if (cleanImage != null) ChatBackgroundPreset.DEFAULT.key else ChatBackgroundPreset.fromKey(presetKey).key
+        viewModelScope.launch {
+            val res = repository.saveChatPreference(
+                peerId = peerId,
+                nickname = existing?.nickname,
+                backgroundPreset = cleanPreset,
+                backgroundImage = cleanImage,
+                isAdmin = isCurrentUserAdmin.value,
+                context = appContext
+            )
+            if (res.isSuccess) {
+                val isReset = cleanPreset == ChatBackgroundPreset.DEFAULT.key && cleanImage == null
+                showToast(if (isReset) "Chat background reset" else "Chat background updated")
+            } else {
+                showToast(res.exceptionOrNull()?.localizedMessage ?: "Unable to save chat background")
+            }
+        }
+    }
+
+    fun toggleBlockUser(targetUserId: String) {
+        if (targetUserId == currentUserId) return
+        val base = privateInfo.value ?: UserPrivateInfo(userId = currentUserId, email = googleEmail)
+        val currentlyBlocked = base.blockedUserIds.contains(targetUserId)
+        val updatedList = if (currentlyBlocked) {
+            base.blockedUserIds - targetUserId
+        } else {
+            (base.blockedUserIds + targetUserId).distinct().takeLast(200)
+        }
+        viewModelScope.launch {
+            val res = repository.savePrivateSettings(base.copy(blockedUserIds = updatedList))
+            if (res.isSuccess) {
+                showToast(if (currentlyBlocked) "User unblocked" else "User blocked")
+            } else {
+                showToast(res.exceptionOrNull()?.localizedMessage ?: "Unable to update block status")
+            }
+        }
+    }
+
+    fun submitChatReport(
+        peer: CampusUser,
+        reason: String,
+        details: String,
+        threadMessages: List<DirectMessage>
+    ) {
+        val peerLabel = if (peer.isBlackSociety) "Member - ${peer.blackSocietyNumber ?: 1}" else peer.name
+        val myLabel = currentUser.value?.let {
+            if (it.isBlackSociety) "Member - ${it.blackSocietyNumber ?: 1}" else it.name
+        } ?: googleDisplayName.ifBlank { "Reporter" }
+        val dateFmt = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+        val lastFive = threadMessages
+            .sortedBy { it.createdAt?.toDate()?.time ?: 0L }
+            .takeLast(5)
+            .map { msg ->
+                val senderName = if (msg.senderId == currentUserId) "$myLabel (Reporter)" else peerLabel
+                val timeLabel = msg.createdAt?.toDate()?.let { dateFmt.format(it) } ?: "Recent"
+                val body = when {
+                    msg.content.isNotBlank() && !msg.mediaData.isNullOrBlank() ->
+                        "${msg.content.trim()} [+${if (MediaUtils.isVideoMediaUri(msg.mediaData)) "Video" else "Photo"}]"
+                    msg.content.isNotBlank() -> msg.content.trim()
+                    !msg.audioData.isNullOrBlank() -> "[Voice note ${msg.audioDurationSec ?: 0}s]"
+                    MediaUtils.isVideoMediaUri(msg.mediaData) -> "[Video attachment]"
+                    !msg.mediaData.isNullOrBlank() -> "[Photo attachment]"
+                    !msg.storyId.isNullOrBlank() -> "[Story reply]"
+                    else -> "[Message]"
+                }
+                "[$timeLabel] $senderName: $body".take(400)
+            }
+        val cleanDetails = details.trim()
+        val combinedDetails = buildString {
+            if (cleanDetails.isNotBlank()) {
+                append(cleanDetails)
+                if (lastFive.isNotEmpty()) append("\n\n")
+            }
+            if (lastFive.isNotEmpty()) {
+                append("Last ${lastFive.size} message(s) forwarded to Admin:\n")
+                lastFive.forEachIndexed { idx, line ->
+                    append("${idx + 1}. $line")
+                    if (idx < lastFive.lastIndex) append("\n")
+                }
+            }
+        }.take(2500)
+        viewModelScope.launch {
+            val res = repository.submitReport(
+                targetType = "chat",
+                targetId = peer.uid,
+                targetSummary = "Chat with $peerLabel (${lastFive.size} msg snapshot)".take(300),
+                reason = reason.ifBlank { "Inappropriate chat behavior" },
+                details = combinedDetails,
+                reportedMessages = lastFive
+            )
+            if (res.isSuccess) {
+                showToast("Report & ${lastFive.size} message(s) sent to Admin")
+            } else {
+                showToast(res.exceptionOrNull()?.localizedMessage ?: "Unable to submit report")
+            }
         }
     }
 
@@ -1375,6 +1532,10 @@ class CampusViewModel(
         val me = currentUser.value
         if (me?.isSuspended == true && !isCurrentUserAdmin.value) {
             showToast("Suspended accounts cannot send replies.")
+            return
+        }
+        if (privateInfo.value?.blockedUserIds.orEmpty().contains(story.authorId)) {
+            showToast("Unblock this user to reply.")
             return
         }
         viewModelScope.launch {

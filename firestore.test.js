@@ -1210,5 +1210,72 @@ test("Notifications: sender can replace/delete old senderAvatar on sent notifica
   }));
 });
 
+test("Chat Preferences & Chat Reports: owner isolates nickname/background and chat report attaches up to 5 messages", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const adminDb = testEnv.authenticatedContext(ADMIN_UID, { email: "zencloud0006@gmail.com", email_verified: true }).firestore();
+
+  await assertSucceeds(
+    aliceDb.collection("users").doc(ALICE_UID).collection("chat_preferences").doc(BOB_UID).set({
+      userId: ALICE_UID,
+      peerId: BOB_UID,
+      nickname: "Study Buddy",
+      backgroundPreset: "aurora",
+      updatedAt: nowTs(),
+    })
+  );
+
+  // Cross-user read/write denied
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("chat_preferences").doc(BOB_UID).get()
+  );
+  await assertFails(
+    bobDb.collection("users").doc(ALICE_UID).collection("chat_preferences").doc(BOB_UID).set({
+      userId: ALICE_UID,
+      peerId: BOB_UID,
+      nickname: "Hacked",
+      updatedAt: nowTs(),
+    })
+  );
+
+  // Invalid background preset rejected
+  await assertFails(
+    aliceDb.collection("users").doc(ALICE_UID).collection("chat_preferences").doc(BOB_UID).update({
+      backgroundPreset: "unknown_theme",
+      updatedAt: nowTs(),
+    })
+  );
+
+  // Chat report with 5 recent messages succeeds and admin can read
+  await assertSucceeds(aliceDb.collection("reports").doc("rep_chat_1").set({
+    reporterId: ALICE_UID,
+    targetType: "chat",
+    targetId: BOB_UID,
+    targetSummary: "Chat with Bob (5 messages attached)",
+    reason: "Harassment, bullying, or hate speech",
+    details: "Repeated insults in DM",
+    reportedMessages: ["Msg 1", "Msg 2", "Msg 3", "Msg 4", "Msg 5"],
+    status: "pending",
+    createdAt: nowTs(),
+    updatedAt: nowTs(),
+  }));
+
+  await assertSucceeds(adminDb.collection("reports").doc("rep_chat_1").get());
+
+  // More than 5 messages rejected
+  await assertFails(aliceDb.collection("reports").doc("rep_chat_too_many").set({
+    reporterId: ALICE_UID,
+    targetType: "chat",
+    targetId: BOB_UID,
+    targetSummary: "Chat with Bob",
+    reason: "Spam",
+    reportedMessages: ["1", "2", "3", "4", "5", "6"],
+    status: "pending",
+    createdAt: nowTs(),
+    updatedAt: nowTs(),
+  }));
+});
+
+
 
 

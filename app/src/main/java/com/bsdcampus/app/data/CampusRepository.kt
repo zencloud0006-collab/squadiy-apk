@@ -15,6 +15,8 @@ import com.bsdcampus.app.model.CampusReel
 import com.bsdcampus.app.model.CampusReport
 import com.bsdcampus.app.model.CampusStory
 import com.bsdcampus.app.model.CampusUser
+import com.bsdcampus.app.model.ChatBackgroundPreset
+import com.bsdcampus.app.model.ChatPreference
 import com.bsdcampus.app.model.DirectMessage
 import com.bsdcampus.app.model.HighlightMediaItem
 import com.bsdcampus.app.model.NoteBubbleColor
@@ -392,6 +394,25 @@ class CampusRepository(
                 .catch { error ->
                     logStreamError(error, OperationType.LIST, path)
                     throw error
+                }
+        )
+    }
+
+    fun observeChatPreferences(uid: String): Flow<Map<String, ChatPreference>> = flow {
+        requireUserId()
+        val path = "users/$uid/chat_preferences"
+        emitAll(
+            db.collection("users").document(uid).collection("chat_preferences")
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        ChatPreference::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).associateBy { pref -> pref.peerId.ifBlank { pref.id } }
+                }
+                .catch { error ->
+                    logStreamError(error, OperationType.LIST, path)
+                    emit(emptyMap())
                 }
         )
     }
@@ -1870,6 +1891,64 @@ class CampusRepository(
         }
     }
 
+    suspend fun saveChatPreference(
+        peerId: String,
+        nickname: String?,
+        backgroundPreset: String,
+        backgroundImage: String?,
+        isAdmin: Boolean = false,
+        context: Context? = null
+    ): Result<Unit> {
+        val uid = requireUserId()
+        if (peerId.isBlank()) {
+            return Result.failure(IllegalArgumentException("Invalid chat user."))
+        }
+        val docRef = db.collection("users").document(uid)
+            .collection("chat_preferences").document(peerId)
+        val cleanNick = nickname?.trim()?.takeIf { it.isNotBlank() }?.take(40)
+        val cleanPreset = ChatBackgroundPreset.fromKey(backgroundPreset).key
+        val cleanImage = backgroundImage?.trim()?.takeIf { it.isNotBlank() }?.take(350_000)
+
+        return try {
+            val previousImage = runCatching {
+                docRef.get().await().getString("backgroundImage")
+            }.getOrNull()
+
+            if (cleanNick == null && cleanPreset == ChatBackgroundPreset.DEFAULT.key && cleanImage == null) {
+                docRef.delete().await()
+            } else {
+                val pref = ChatPreference(
+                    id = peerId,
+                    userId = uid,
+                    peerId = peerId,
+                    nickname = cleanNick,
+                    backgroundPreset = cleanPreset,
+                    backgroundImage = cleanImage
+                )
+                docRef.set(pref.toWriteMap()).await()
+            }
+
+            if (!previousImage.isNullOrBlank() && previousImage != cleanImage) {
+                if (previousImage.startsWith("bsdmedia://")) {
+                    CampusMediaRepository.deleteMediaAssetsForUris(
+                        uris = listOf(previousImage),
+                        isAdmin = isAdmin,
+                        db = db,
+                        auth = auth,
+                        context = context
+                    )
+                }
+                CampusMediaRepository.evictCachedImage(context, previousImage)
+            }
+            Result.success(Unit)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+            Result.failure(e)
+        }
+    }
+
     private suspend fun sendNotification(
         recipientId: String,
         actor: CampusUser,
@@ -1921,7 +2000,8 @@ class CampusRepository(
         targetId: String,
         targetSummary: String,
         reason: String,
-        details: String?
+        details: String?,
+        reportedMessages: List<String> = emptyList()
     ): Result<Unit> {
         val uid = requireUserId()
         val docRef = db.collection("reports").document(UUID.randomUUID().toString())
@@ -1931,7 +2011,11 @@ class CampusRepository(
             targetId = targetId,
             targetSummary = targetSummary.take(300),
             reason = reason.take(160),
-            details = details?.trim()?.take(1000),
+            details = details?.trim()?.takeIf { it.isNotBlank() }?.take(2500),
+            reportedMessages = reportedMessages
+                .map { it.trim().take(400) }
+                .filter { it.isNotBlank() }
+                .take(5),
             status = "pending"
         )
         return try {

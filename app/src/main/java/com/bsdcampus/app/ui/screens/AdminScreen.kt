@@ -587,12 +587,56 @@ fun AdminScreen(
                                 color = MaterialTheme.colorScheme.surface,
                                 border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
                             ) {
-                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("${report.targetType.uppercase()} • ${report.status.uppercase()}", style = MaterialTheme.typography.labelLarge, color = InstaBlue)
                                         Text(report.reason, style = MaterialTheme.typography.labelSmall, color = InstaLikeRed)
                                     }
-                                    Text(report.targetSummary, style = MaterialTheme.typography.bodySmall)
+                                    Text(report.targetSummary, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                                    if (!report.details.isNullOrBlank() && report.reportedMessages.isEmpty()) {
+                                        Text(
+                                            text = report.details,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else if (!report.details.isNullOrBlank()) {
+                                        val noteOnly = report.details.substringBefore("\n\nLast ").trim()
+                                        if (noteOnly.isNotBlank() && !noteOnly.startsWith("Last ")) {
+                                            Text(
+                                                text = noteOnly,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    if (report.reportedMessages.isNotEmpty()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Forwarded Chat Evidence (${report.reportedMessages.size} message${if (report.reportedMessages.size == 1) "" else "s"})",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = InstaBlue
+                                                )
+                                                report.reportedMessages.forEachIndexed { idx, msgLine ->
+                                                    Text(
+                                                        text = "${idx + 1}. $msgLine",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                     if (report.status == "pending") {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(

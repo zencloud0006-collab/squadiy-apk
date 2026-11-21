@@ -57,6 +57,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -72,11 +73,14 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -87,6 +91,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -97,12 +102,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -123,6 +130,8 @@ import com.bsdcampus.app.data.StoryMusicTrack
 import com.bsdcampus.app.model.CampusConstants
 import com.bsdcampus.app.model.CampusNote
 import com.bsdcampus.app.model.CampusUser
+import com.bsdcampus.app.model.ChatBackgroundPreset
+import com.bsdcampus.app.model.ChatPreference
 import com.bsdcampus.app.model.ConversationSummary
 import com.bsdcampus.app.model.DirectMessage
 import com.bsdcampus.app.model.NoteBubbleColor
@@ -156,6 +165,8 @@ fun ChatScreen(
     messages: List<DirectMessage>,
     notes: List<CampusNote> = emptyList(),
     typingMap: Map<String, Boolean>,
+    chatPreferences: Map<String, ChatPreference> = emptyMap(),
+    blockedUserIds: Set<String> = emptySet(),
     activeChatUserId: String?,
     onSelectChatUser: (String) -> Unit,
     onClearChatUser: () -> Unit,
@@ -168,6 +179,10 @@ fun ChatScreen(
     onSetTyping: (recipientId: String, isTyping: Boolean) -> Unit,
     onSaveNote: (text: String, bubbleColor: NoteBubbleColor, musicTrack: StoryMusicTrack?, musicStartSec: Int, onSuccess: () -> Unit) -> Unit = { _, _, _, _, _ -> },
     onDeleteNote: (onDone: () -> Unit) -> Unit = { _ -> },
+    onSetNickname: (peerId: String, nickname: String?) -> Unit = { _, _ -> },
+    onSetBackground: (peerId: String, presetKey: String, imageUri: String?) -> Unit = { _, _, _ -> },
+    onToggleBlockUser: (String) -> Unit = {},
+    onSubmitChatReport: (peer: CampusUser, reason: String, details: String, threadMessages: List<DirectMessage>) -> Unit = { _, _, _, _ -> },
     onShowToast: (String) -> Unit
 ) {
     val allUsers = (allUsersState as? UiState.Success)?.data.orEmpty()
@@ -197,6 +212,8 @@ fun ChatScreen(
                         allUsers = allUsers,
                         conversations = conversations,
                         notes = notes,
+                        chatPreferences = chatPreferences,
+                        blockedUserIds = blockedUserIds,
                         selectedPeerId = activeChatUserId,
                         onSelectPeer = onSelectChatUser,
                         onOpenNewChat = { showNewChatPicker = true },
@@ -222,6 +239,8 @@ fun ChatScreen(
                                     (it.senderId == activePeer.uid && it.recipientId == currentUser.uid)
                             },
                             isPeerTyping = typingMap[activePeer.uid] == true,
+                            chatPreference = chatPreferences[activePeer.uid],
+                            isBlocked = blockedUserIds.contains(activePeer.uid),
                             showBackButton = false,
                             onBack = onClearChatUser,
                             onOpenPeerProfile = { onOpenProfile(activePeer.uid) },
@@ -233,6 +252,12 @@ fun ChatScreen(
                             onToggleReaction = onToggleReaction,
                             onMarkRead = { onMarkThreadRead(activePeer.uid) },
                             onSetTyping = { typing -> onSetTyping(activePeer.uid, typing) },
+                            onSetNickname = { nick -> onSetNickname(activePeer.uid, nick) },
+                            onSetBackground = { preset, img -> onSetBackground(activePeer.uid, preset, img) },
+                            onToggleBlock = { onToggleBlockUser(activePeer.uid) },
+                            onSubmitChatReport = { reason, details, msgs ->
+                                onSubmitChatReport(activePeer, reason, details, msgs)
+                            },
                             onShowToast = onShowToast
                         )
                     } else {
@@ -268,6 +293,8 @@ fun ChatScreen(
                             (it.senderId == activePeer.uid && it.recipientId == currentUser.uid)
                     },
                     isPeerTyping = typingMap[activePeer.uid] == true,
+                    chatPreference = chatPreferences[activePeer.uid],
+                    isBlocked = blockedUserIds.contains(activePeer.uid),
                     showBackButton = true,
                     onBack = onClearChatUser,
                     onOpenPeerProfile = { onOpenProfile(activePeer.uid) },
@@ -279,6 +306,12 @@ fun ChatScreen(
                     onToggleReaction = onToggleReaction,
                     onMarkRead = { onMarkThreadRead(activePeer.uid) },
                     onSetTyping = { typing -> onSetTyping(activePeer.uid, typing) },
+                    onSetNickname = { nick -> onSetNickname(activePeer.uid, nick) },
+                    onSetBackground = { preset, img -> onSetBackground(activePeer.uid, preset, img) },
+                    onToggleBlock = { onToggleBlockUser(activePeer.uid) },
+                    onSubmitChatReport = { reason, details, msgs ->
+                        onSubmitChatReport(activePeer, reason, details, msgs)
+                    },
                     onShowToast = onShowToast
                 )
             } else {
@@ -287,6 +320,8 @@ fun ChatScreen(
                     allUsers = allUsers,
                     conversations = conversations,
                     notes = notes,
+                    chatPreferences = chatPreferences,
+                    blockedUserIds = blockedUserIds,
                     selectedPeerId = null,
                     onSelectPeer = onSelectChatUser,
                     onOpenNewChat = { showNewChatPicker = true },
@@ -467,6 +502,8 @@ private fun ConversationListPane(
     allUsers: List<CampusUser>,
     conversations: List<ConversationSummary>,
     notes: List<CampusNote>,
+    chatPreferences: Map<String, ChatPreference>,
+    blockedUserIds: Set<String>,
     selectedPeerId: String?,
     onSelectPeer: (String) -> Unit,
     onOpenNewChat: () -> Unit,
@@ -482,9 +519,12 @@ private fun ConversationListPane(
     val unreadThreadsCount = remember(visibleConversations) {
         visibleConversations.count { it.unreadCount > 0 }
     }
-    val filtered = remember(visibleConversations, search, filterUnreadOnly) {
+    val filtered = remember(visibleConversations, search, filterUnreadOnly, chatPreferences) {
         visibleConversations.filter { convo ->
-            val matchesSearch = search.isBlank() || convo.otherUser.name.contains(search, ignoreCase = true)
+            val nick = chatPreferences[convo.otherUser.uid]?.nickname.orEmpty()
+            val matchesSearch = search.isBlank() ||
+                convo.otherUser.name.contains(search, ignoreCase = true) ||
+                nick.contains(search, ignoreCase = true)
             val matchesUnread = !filterUnreadOnly || convo.unreadCount > 0
             matchesSearch && matchesUnread
         }
@@ -740,9 +780,15 @@ private fun ConversationListPane(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
+                            val peerNickname = chatPreferences[convo.otherUser.uid]?.nickname?.takeIf { it.isNotBlank() }
+                            val isConvoBlocked = blockedUserIds.contains(convo.otherUser.uid)
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    text = if (convo.otherUser.isBlackSociety) "Member - ${convo.otherUser.blackSocietyNumber ?: 1}" else convo.otherUser.name,
+                                    text = if (convo.otherUser.isBlackSociety) {
+                                        "Member - ${convo.otherUser.blackSocietyNumber ?: 1}"
+                                    } else {
+                                        peerNickname ?: convo.otherUser.name
+                                    },
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = if (hasUnread) FontWeight.Black else FontWeight.SemiBold,
                                     maxLines = 1,
@@ -752,6 +798,22 @@ private fun ConversationListPane(
                                 if (convo.otherUser.isVerified && !convo.otherUser.isBlackSociety) {
                                     Spacer(modifier = Modifier.width(4.dp))
                                     VerifiedBadgeIcon(size = 14.dp)
+                                }
+                                if (isConvoBlocked) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = InstaLikeRed.copy(alpha = 0.12f)
+                                    ) {
+                                        Text(
+                                            text = "Blocked",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = InstaLikeRed,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                                        )
+                                    }
                                 }
                             }
                             Spacer(modifier = Modifier.height(2.dp))
@@ -817,6 +879,8 @@ private fun ChatThreadPane(
     peer: CampusUser,
     threadMessages: List<DirectMessage>,
     isPeerTyping: Boolean,
+    chatPreference: ChatPreference?,
+    isBlocked: Boolean,
     showBackButton: Boolean,
     onBack: () -> Unit,
     onOpenPeerProfile: () -> Unit,
@@ -826,6 +890,10 @@ private fun ChatThreadPane(
     onToggleReaction: (DirectMessage, String) -> Unit,
     onMarkRead: () -> Unit,
     onSetTyping: (Boolean) -> Unit,
+    onSetNickname: (String?) -> Unit,
+    onSetBackground: (presetKey: String, imageUri: String?) -> Unit,
+    onToggleBlock: () -> Unit,
+    onSubmitChatReport: (reason: String, details: String, threadMessages: List<DirectMessage>) -> Unit,
     onShowToast: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -833,6 +901,30 @@ private fun ChatThreadPane(
     val listState = rememberLazyListState()
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
+
+    var showChatDetails by remember(peer.uid) { mutableStateOf(false) }
+
+    val peerNickname = chatPreference?.nickname?.takeIf { it.isNotBlank() }
+    val realPeerName = if (peer.isBlackSociety) "Member - ${peer.blackSocietyNumber ?: 1}" else peer.name
+    val effectivePeerName = if (peer.isBlackSociety) realPeerName else (peerNickname ?: realPeerName)
+
+    if (showChatDetails) {
+        ChatDetailsScreen(
+            currentUser = currentUser,
+            peer = peer,
+            threadMessages = threadMessages,
+            chatPreference = chatPreference,
+            isBlocked = isBlocked,
+            onBack = { showChatDetails = false },
+            onOpenPeerProfile = onOpenPeerProfile,
+            onSetNickname = onSetNickname,
+            onSetBackground = onSetBackground,
+            onToggleBlock = onToggleBlock,
+            onSubmitChatReport = onSubmitChatReport,
+            onShowToast = onShowToast
+        )
+        return
+    }
 
     var draft by remember { mutableStateOf("") }
     var attachedMedia by remember { mutableStateOf<String?>(null) }
@@ -843,6 +935,12 @@ private fun ChatThreadPane(
     var editDraft by remember { mutableStateOf("") }
     var zoomedImageUrl by remember { mutableStateOf<String?>(null) }
     var pendingSafSaveUrl by remember { mutableStateOf<String?>(null) }
+
+    var isComposerFocused by remember { mutableStateOf(false) }
+    var listViewportHeightPx by remember { mutableIntStateOf(0) }
+    var prevViewportHeightPx by remember { mutableIntStateOf(0) }
+    var prevImeBottomPx by remember { mutableIntStateOf(0) }
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
 
     var isRecording by remember { mutableStateOf(false) }
     var recordingSeconds by remember { mutableLongStateOf(0L) }
@@ -881,8 +979,7 @@ private fun ChatThreadPane(
 
     fun senderDisplayNameFor(senderId: String): String {
         return if (senderId == currentUser.uid) "You"
-        else if (peer.isBlackSociety) "Member - ${peer.blackSocietyNumber ?: 1}"
-        else peer.name
+        else effectivePeerName
     }
 
     DisposableEffect(Unit) {
@@ -910,7 +1007,22 @@ private fun ChatThreadPane(
         onMarkRead()
         val total = threadMessages.size + if (isPeerTyping) 1 else 0
         if (total > 0) {
-            listState.animateScrollToItem(total - 1)
+            listState.animateScrollToItem(total - 1, scrollOffset = 10_000)
+        }
+    }
+
+    // Keep latest message pinned above the keyboard whenever keyboard opens or viewport shrinks
+    LaunchedEffect(imeBottomPx, listViewportHeightPx, isComposerFocused) {
+        val total = threadMessages.size + if (isPeerTyping) 1 else 0
+        val keyboardOpening = imeBottomPx > prevImeBottomPx && imeBottomPx > 0
+        val viewportShrank = prevViewportHeightPx > 0 && listViewportHeightPx in 1 until prevViewportHeightPx
+        val focusedWithKeyboard = isComposerFocused && imeBottomPx > 0
+        prevImeBottomPx = imeBottomPx
+        if (listViewportHeightPx > 0) {
+            prevViewportHeightPx = listViewportHeightPx
+        }
+        if (total > 0 && (keyboardOpening || viewportShrank || focusedWithKeyboard)) {
+            listState.scrollToItem(total - 1, scrollOffset = 100_000)
         }
     }
 
@@ -1051,7 +1163,7 @@ private fun ChatThreadPane(
     }
 
     Column(modifier = containerModifier) {
-        // Instagram DM Chat Header
+        // Instagram DM Chat Header (tap name/avatar row to open Chat Details)
         Surface(color = MaterialTheme.colorScheme.background, tonalElevation = 0.dp) {
             Row(
                 modifier = Modifier
@@ -1067,7 +1179,10 @@ private fun ChatThreadPane(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .clickable(onClick = onOpenPeerProfile),
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { showChatDetails = true }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                        .testTag("chat_header_details_trigger"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     UserAvatar(
@@ -1084,23 +1199,30 @@ private fun ChatThreadPane(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (peer.isBlackSociety) "Member - ${peer.blackSocietyNumber ?: 1}" else peer.name,
+                                text = effectivePeerName,
                                 style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             if (peer.isVerified && !peer.isBlackSociety) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 VerifiedBadgeIcon(size = 14.dp)
                             }
                         }
-                        val statusText = remember(peer.lastSeenAt, isPeerTyping) {
-                            formatLastSeenStatus(peer, isTyping = isPeerTyping)
+                        val statusText = remember(peer.lastSeenAt, isPeerTyping, isBlocked) {
+                            if (isBlocked) "Blocked • Tap name for options"
+                            else formatLastSeenStatus(peer, isTyping = isPeerTyping)
                         }
                         Text(
                             text = statusText,
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isPeerTyping || statusText == "Active now") InstaBlue else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = if (isPeerTyping || statusText == "Active now") FontWeight.SemiBold else FontWeight.Normal
+                            color = when {
+                                isBlocked -> InstaLikeRed
+                                isPeerTyping || statusText == "Active now" -> InstaBlue
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = if (isBlocked || isPeerTyping || statusText == "Active now") FontWeight.SemiBold else FontWeight.Normal
                         )
                     }
                 }
@@ -1120,15 +1242,52 @@ private fun ChatThreadPane(
         }
         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
-        // Messages Stream (Instagram-style stacking + avatar only on last message in run)
-        LazyColumn(
-            state = listState,
+        val activePreset = ChatBackgroundPreset.fromKey(chatPreference?.backgroundPreset)
+        val customBgImage = chatPreference?.backgroundImage?.takeIf { it.isNotBlank() }
+        val isDarkWallpaper = customBgImage != null || activePreset.isDarkPreset
+        val isLightWallpaper = customBgImage == null && !activePreset.isDarkPreset && activePreset != ChatBackgroundPreset.DEFAULT
+        val subtleWallpaperTextColor = when {
+            isDarkWallpaper -> Color.White.copy(alpha = 0.85f)
+            isLightWallpaper -> Color(0xFF1E293B).copy(alpha = 0.78f)
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        }
+
+        // Messages Stream with optional custom chat background
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
+            if (customBgImage != null) {
+                CampusImage(
+                    urlOrDataUri = customBgImage,
+                    contentDescription = "Chat background",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.30f))
+                )
+            } else if (activePreset != ChatBackgroundPreset.DEFAULT) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.verticalGradient(activePreset.colorsArgb.map { Color(it) }))
+                )
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { size ->
+                        listViewportHeightPx = size.height
+                    },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
             if (threadMessages.isEmpty() && !isPeerTyping) {
                 item {
                     Column(
@@ -1150,9 +1309,10 @@ private fun ChatThreadPane(
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = if (peer.isBlackSociety) "Member - ${peer.blackSocietyNumber ?: 1}" else peer.name,
+                                text = effectivePeerName,
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDarkWallpaper) Color.White else MaterialTheme.colorScheme.onSurface
                             )
                             if (peer.isVerified && !peer.isBlackSociety) {
                                 Spacer(modifier = Modifier.width(4.dp))
@@ -1162,7 +1322,7 @@ private fun ChatThreadPane(
                         Text(
                             text = "${peer.grade ?: peer.role.replaceFirstChar { it.uppercase() }} • Squadify",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = subtleWallpaperTextColor
                         )
                     }
                 }
@@ -1452,8 +1612,8 @@ private fun ChatThreadPane(
                         if (!msg.replyToMessageId.isNullOrBlank()) {
                             val replyLabel = when {
                                 msg.replyToSenderId == currentUser.uid && isMine -> "You replied to yourself"
-                                isMine -> "You replied to ${msg.replyToSenderName ?: peer.name.substringBefore(" ")}"
-                                msg.replyToSenderId == currentUser.uid -> "${peer.name.substringBefore(" ")} replied to you"
+                                isMine -> "You replied to ${msg.replyToSenderName ?: effectivePeerName.substringBefore(" ")}"
+                                msg.replyToSenderId == currentUser.uid -> "${effectivePeerName.substringBefore(" ")} replied to you"
                                 else -> "Replied to ${msg.replyToSenderName ?: "message"}"
                             }
                             Column(
@@ -1474,7 +1634,7 @@ private fun ChatThreadPane(
                                     text = replyLabel,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = subtleWallpaperTextColor
                                 )
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
@@ -1721,7 +1881,7 @@ private fun ChatThreadPane(
                                     text = "Seen",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = subtleWallpaperTextColor
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
                                 Box(
@@ -1745,7 +1905,7 @@ private fun ChatThreadPane(
                                     text = "Sent",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = subtleWallpaperTextColor
                                 )
                             }
                         }
@@ -1760,6 +1920,7 @@ private fun ChatThreadPane(
                     }
                 }
             }
+            }
         }
 
         // Reply Preview Bar in Composer
@@ -1767,7 +1928,7 @@ private fun ChatThreadPane(
             val targetName = if (target.senderId == currentUser.uid) {
                 "yourself"
             } else {
-                if (peer.isBlackSociety) "Member - ${peer.blackSocietyNumber ?: 1}" else peer.name.substringBefore(" ")
+                effectivePeerName.substringBefore(" ")
             }
             val snippet = target.content.ifBlank {
                 when {
@@ -1843,160 +2004,210 @@ private fun ChatThreadPane(
             }
         }
 
-        // Instagram Pill Composer Row
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
-        ) {
-            Row(
+        // Composer or Blocked Banner
+        if (isBlocked) {
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
             ) {
-                IconButton(
-                    onClick = {
-                        mediaPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                        )
-                    },
-                    enabled = !isUploadingMedia && !isRecording,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    if (isUploadingMedia) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(
-                            Icons.Outlined.AddPhotoAlternate,
-                            contentDescription = "Attach Photo or Video",
-                            tint = InstaBlue
-                        )
-                    }
-                }
-
-                val recTransition = rememberInfiniteTransition(label = "micPulse")
-                val micPulseScale by recTransition.animateFloat(
-                    initialValue = 1f,
-                    targetValue = if (isRecording) 1.18f else 1f,
-                    animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
-                    label = "micScale"
-                )
-                IconButton(
-                    onClick = {
-                        if (isRecording) {
-                            stopAndSendVoiceRecording()
-                        } else {
-                            val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                            if (hasPerm) startVoiceRecording() else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    },
+                Row(
                     modifier = Modifier
-                        .size(40.dp)
-                        .scale(if (isRecording) micPulseScale else 1f)
-                        .clip(CircleShape)
-                        .background(if (isRecording) InstaLikeRed.copy(alpha = 0.16f) else Color.Transparent)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
-                        contentDescription = if (isRecording) "Stop and send voice note" else "Record voice note",
-                        tint = if (isRecording) InstaLikeRed else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 6.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (isRecording) {
-                        Text(
-                            text = "Recording voice note (${recordingSeconds}s)...",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = InstaLikeRed,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    } else {
-                        if (draft.isEmpty()) {
-                            Text(
-                                text = "Message...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        BasicTextField(
-                            value = draft,
-                            onValueChange = { draft = it },
-                            maxLines = 4,
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                            cursorBrush = SolidColor(InstaBlue),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("chat_message_input")
-                        )
-                    }
-                }
-
-                val canSend = !isRecording && !isUploadingMedia && (draft.isNotBlank() || attachedMedia != null)
-                if (canSend) {
-                    IconButton(
-                        onClick = {
-                            val replyTarget = replyingToMessage
-                            onSendMessage(
-                                draft.trim(),
-                                attachedMedia,
-                                null,
-                                null,
-                                replyTarget,
-                                replyTarget?.let { senderDisplayNameFor(it.senderId) }
-                            )
-                            draft = ""
-                            attachedMedia = null
-                            replyingToMessage = null
-                            onSetTyping(false)
-                        },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(InstaBlue)
-                            .testTag("chat_send_button")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
                     ) {
                         Icon(
-                            Icons.AutoMirrored.Outlined.Send,
-                            contentDescription = "Send message",
-                            tint = Color.White,
+                            imageVector = Icons.Filled.Block,
+                            contentDescription = null,
+                            tint = InstaLikeRed,
                             modifier = Modifier.size(18.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "You blocked $effectivePeerName",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
-                } else if (!isRecording && !isUploadingMedia) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = onToggleBlock,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("chat_unblock_button")
+                    ) {
+                        Text("Unblock", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        } else {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(26.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     IconButton(
                         onClick = {
-                            val replyTarget = replyingToMessage
-                            onSendMessage(
-                                "❤️",
-                                null,
-                                null,
-                                null,
-                                replyTarget,
-                                replyTarget?.let { senderDisplayNameFor(it.senderId) }
+                            mediaPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                             )
-                            replyingToMessage = null
+                        },
+                        enabled = !isUploadingMedia && !isRecording,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        if (isUploadingMedia) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(
+                                Icons.Outlined.AddPhotoAlternate,
+                                contentDescription = "Attach Photo or Video",
+                                tint = InstaBlue
+                            )
+                        }
+                    }
+
+                    val recTransition = rememberInfiniteTransition(label = "micPulse")
+                    val micPulseScale by recTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = if (isRecording) 1.18f else 1f,
+                        animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
+                        label = "micScale"
+                    )
+                    IconButton(
+                        onClick = {
+                            if (isRecording) {
+                                stopAndSendVoiceRecording()
+                            } else {
+                                val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                                if (hasPerm) startVoiceRecording() else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
                         },
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
+                            .scale(if (isRecording) micPulseScale else 1f)
                             .clip(CircleShape)
-                            .testTag("chat_quick_heart_button")
+                            .background(if (isRecording) InstaLikeRed.copy(alpha = 0.16f) else Color.Transparent)
                     ) {
                         Icon(
-                            Icons.Filled.Favorite,
-                            contentDescription = "Send heart",
-                            tint = InstaLikeRed,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                            contentDescription = if (isRecording) "Stop and send voice note" else "Record voice note",
+                            tint = if (isRecording) InstaLikeRed else MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (isRecording) {
+                            Text(
+                                text = "Recording voice note (${recordingSeconds}s)...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = InstaLikeRed,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else {
+                            if (draft.isEmpty()) {
+                                Text(
+                                    text = "Message...",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            BasicTextField(
+                                value = draft,
+                                onValueChange = { draft = it },
+                                maxLines = 4,
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                                cursorBrush = SolidColor(InstaBlue),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { focusState ->
+                                        isComposerFocused = focusState.isFocused
+                                    }
+                                    .testTag("chat_message_input")
+                            )
+                        }
+                    }
+
+                    val canSend = !isRecording && !isUploadingMedia && (draft.isNotBlank() || attachedMedia != null)
+                    if (canSend) {
+                        IconButton(
+                            onClick = {
+                                val replyTarget = replyingToMessage
+                                onSendMessage(
+                                    draft.trim(),
+                                    attachedMedia,
+                                    null,
+                                    null,
+                                    replyTarget,
+                                    replyTarget?.let { senderDisplayNameFor(it.senderId) }
+                                )
+                                draft = ""
+                                attachedMedia = null
+                                replyingToMessage = null
+                                onSetTyping(false)
+                            },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(InstaBlue)
+                                .testTag("chat_send_button")
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Outlined.Send,
+                                contentDescription = "Send message",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    } else if (!isRecording && !isUploadingMedia) {
+                        IconButton(
+                            onClick = {
+                                val replyTarget = replyingToMessage
+                                onSendMessage(
+                                    "❤️",
+                                    null,
+                                    null,
+                                    null,
+                                    replyTarget,
+                                    replyTarget?.let { senderDisplayNameFor(it.senderId) }
+                                )
+                                replyingToMessage = null
+                            },
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .testTag("chat_quick_heart_button")
+                        ) {
+                            Icon(
+                                Icons.Filled.Favorite,
+                                contentDescription = "Send heart",
+                                tint = InstaLikeRed,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
