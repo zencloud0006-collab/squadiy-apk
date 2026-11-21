@@ -1,0 +1,837 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSuperAdminEmail() {
+      return isSignedIn() &&
+             ('email' in request.auth.token) &&
+             ('email_verified' in request.auth.token) &&
+             request.auth.token.email.lower() == 'zencloud0006@gmail.com' &&
+             request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isSuperAdminEmail() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function notSuspended() {
+      return !exists(/databases/$(database)/documents/campus_profiles/$(request.auth.uid)) ||
+             !('isSuspended' in get(/databases/$(database)/documents/campus_profiles/$(request.auth.uid)).data) ||
+             get(/databases/$(database)/documents/campus_profiles/$(request.auth.uid)).data.isSuspended != true;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isValidAdminMarker(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 160)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidCampusProfile(data) {
+      return data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+             data.role in ['student', 'teacher', 'admin'] &&
+             (!('grade' in data) || (data.grade is string && data.grade.size() <= 80)) &&
+             (!('gradeLocked' in data) || data.gradeLocked is bool) &&
+             (!('avatar' in data) || (data.avatar is string && data.avatar.size() <= 350000)) &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 200)) &&
+             data.isApproved is bool &&
+             data.isVerified is bool &&
+             data.isSuspended is bool &&
+             data.isBlackSociety is bool &&
+             (!('blackSocietyNumber' in data) || (data.blackSocietyNumber is int && data.blackSocietyNumber >= 0 && data.blackSocietyNumber <= 10000)) &&
+             data.isClassRepresentative is bool &&
+             (!('classRepresentativeGrade' in data) || (data.classRepresentativeGrade is int && data.classRepresentativeGrade >= 0 && data.classRepresentativeGrade <= 12)) &&
+             data.isActive is bool &&
+             (!('isPrivateAccount' in data) || data.isPrivateAccount is bool) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt) &&
+             (!('lastSeenAt' in data) || isValidTimestamp(data.lastSeenAt));
+    }
+
+    function isValidUserPrivateInfo(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+             (!('language' in data) || (data.language is string && data.language.size() <= 60)) &&
+             (!('feedLayoutMode' in data) || (data.feedLayoutMode is string && data.feedLayoutMode.size() <= 30)) &&
+             (!('hideLikeCounts' in data) || data.hideLikeCounts is bool) &&
+             (!('isPrivateAccount' in data) || data.isPrivateAccount is bool) &&
+             (!('pushLikes' in data) || data.pushLikes is bool) &&
+             (!('pushComments' in data) || data.pushComments is bool) &&
+             (!('pushAnnouncements' in data) || data.pushAnnouncements is bool) &&
+             (!('dataSaver' in data) || data.dataSaver is bool) &&
+             (!('highQualityMedia' in data) || data.highQualityMedia is bool) &&
+             (!('savedPostIds' in data) || (data.savedPostIds is list && data.savedPostIds.size() <= 200 && (data.savedPostIds.size() == 0 || data.savedPostIds[0] is string))) &&
+             (!('savedReelIds' in data) || (data.savedReelIds is list && data.savedReelIds.size() <= 200 && (data.savedReelIds.size() == 0 || data.savedReelIds[0] is string))) &&
+             (!('archivedPostIds' in data) || (data.archivedPostIds is list && data.archivedPostIds.size() <= 200 && (data.archivedPostIds.size() == 0 || data.archivedPostIds[0] is string))) &&
+             (!('blockedUserIds' in data) || (data.blockedUserIds is list && data.blockedUserIds.size() <= 200 && (data.blockedUserIds.size() == 0 || data.blockedUserIds[0] is string))) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidFollow(data) {
+      return data.followerId is string && data.followerId.size() >= 1 && data.followerId.size() <= 128 &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.isActive is bool &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidPost(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 350000)) &&
+             data.authorRole in ['student', 'teacher', 'admin'] &&
+             (!('authorGrade' in data) || (data.authorGrade is string && data.authorGrade.size() <= 80)) &&
+             (!('authorIsVerified' in data) || data.authorIsVerified is bool) &&
+             (!('authorIsBlackSociety' in data) || data.authorIsBlackSociety is bool) &&
+             (!('authorBlackSocietyNumber' in data) || (data.authorBlackSocietyNumber is int && data.authorBlackSocietyNumber >= 0)) &&
+             (!('authorIsClassRepresentative' in data) || data.authorIsClassRepresentative is bool) &&
+             (!('authorClassRepresentativeGrade' in data) || (data.authorClassRepresentativeGrade is int && data.authorClassRepresentativeGrade >= 0 && data.authorClassRepresentativeGrade <= 12)) &&
+             data.content is string && data.content.size() <= 2000 &&
+             data.category in ['Announcements', 'News', 'Academic', 'Achievements', 'Sports', 'Events', 'General'] &&
+             (!('images' in data) || (data.images is list && (data.images.size() == 0 || (data.images[0] is string && data.images[0].size() <= 350000)))) &&
+             (!('imageAspectRatio' in data) || data.imageAspectRatio in ['free', '1:1', '4:5', '16:9', '9:16']) &&
+             (!('musicTitle' in data) || (data.musicTitle is string && data.musicTitle.size() <= 120)) &&
+             (!('musicArtist' in data) || (data.musicArtist is string && data.musicArtist.size() <= 120)) &&
+             (!('musicArtworkUrl' in data) || (data.musicArtworkUrl is string && data.musicArtworkUrl.size() <= 500)) &&
+             (!('musicPreviewUrl' in data) || (data.musicPreviewUrl is string && data.musicPreviewUrl.size() <= 500)) &&
+             (!('musicStartSec' in data) || (data.musicStartSec is int && data.musicStartSec >= 0 && data.musicStartSec <= 60)) &&
+             data.isOfficial is bool &&
+             data.isPinned is bool &&
+             data.likedBy is list && data.likedBy.size() <= 500 && (data.likedBy.size() == 0 || data.likedBy[0] is string) &&
+             (!('viewedBy' in data) || (data.viewedBy is list && data.viewedBy.size() <= 500 && (data.viewedBy.size() == 0 || data.viewedBy[0] is string))) &&
+             data.commentsCount is int && data.commentsCount >= 0 && data.commentsCount <= 100000 &&
+             data.isActive is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidComment(data) {
+      return data.postId is string && data.postId.size() >= 1 && data.postId.size() <= 128 &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 350000)) &&
+             data.authorRole in ['student', 'teacher', 'admin'] &&
+             (!('authorGrade' in data) || (data.authorGrade is string && data.authorGrade.size() <= 80)) &&
+             (!('authorIsVerified' in data) || data.authorIsVerified is bool) &&
+             (!('authorIsBlackSociety' in data) || data.authorIsBlackSociety is bool) &&
+             (!('authorBlackSocietyNumber' in data) || (data.authorBlackSocietyNumber is int && data.authorBlackSocietyNumber >= 0)) &&
+             (!('authorIsClassRepresentative' in data) || data.authorIsClassRepresentative is bool) &&
+             (!('authorClassRepresentativeGrade' in data) || (data.authorClassRepresentativeGrade is int && data.authorClassRepresentativeGrade >= 0 && data.authorClassRepresentativeGrade <= 12)) &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 1000 &&
+             (!('replyToCommentId' in data) || (data.replyToCommentId is string && data.replyToCommentId.size() >= 1 && data.replyToCommentId.size() <= 128)) &&
+             (!('replyToAuthorName' in data) || (data.replyToAuthorName is string && data.replyToAuthorName.size() <= 80)) &&
+             (!('replyToContent' in data) || (data.replyToContent is string && data.replyToContent.size() <= 300)) &&
+             (!('likedBy' in data) || (data.likedBy is list && data.likedBy.size() <= 500 && (data.likedBy.size() == 0 || data.likedBy[0] is string))) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidMessage(data) {
+      return data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.recipientId is string && data.recipientId.size() >= 1 && data.recipientId.size() <= 128 &&
+             data.participants is list && data.participants.size() == 2 &&
+             data.participants[0] is string && data.participants[1] is string &&
+             data.content is string && data.content.size() <= 2000 &&
+             (!('mediaData' in data) || (data.mediaData is string && data.mediaData.size() <= 350000)) &&
+             (!('audioData' in data) || (data.audioData is string && data.audioData.size() <= 350000)) &&
+             (!('audioDurationSec' in data) || (data.audioDurationSec is int && data.audioDurationSec >= 0 && data.audioDurationSec <= 300)) &&
+             (!('storyId' in data) || (data.storyId is string && data.storyId.size() >= 1 && data.storyId.size() <= 128)) &&
+             (!('storyAuthorName' in data) || (data.storyAuthorName is string && data.storyAuthorName.size() <= 80)) &&
+             (!('storyMediaUrl' in data) || (data.storyMediaUrl is string && data.storyMediaUrl.size() <= 350000)) &&
+             (!('storyMediaType' in data) || data.storyMediaType in ['image', 'video', 'post_card']) &&
+             (!('storyCaption' in data) || (data.storyCaption is string && data.storyCaption.size() <= 300)) &&
+             (!('replyToMessageId' in data) || (data.replyToMessageId is string && data.replyToMessageId.size() >= 1 && data.replyToMessageId.size() <= 128)) &&
+             (!('replyToSenderId' in data) || (data.replyToSenderId is string && data.replyToSenderId.size() >= 1 && data.replyToSenderId.size() <= 128)) &&
+             (!('replyToSenderName' in data) || (data.replyToSenderName is string && data.replyToSenderName.size() <= 80)) &&
+             (!('replyToContent' in data) || (data.replyToContent is string && data.replyToContent.size() <= 500)) &&
+             (!('replyToMediaType' in data) || data.replyToMediaType in ['text', 'image', 'video', 'audio', 'story']) &&
+             data.read is bool &&
+             data.edited is bool &&
+             data.reactions is list && data.reactions.size() <= 50 && (data.reactions.size() == 0 || (data.reactions[0] is string && data.reactions[0].size() <= 160)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidTypingStatus(data) {
+      return data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.recipientId is string && data.recipientId.size() >= 1 && data.recipientId.size() <= 128 &&
+             data.participants is list && data.participants.size() == 2 &&
+             data.participants[0] is string && data.participants[1] is string &&
+             data.isTyping is bool &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidNotification(data) {
+      return data.recipientId is string && data.recipientId.size() >= 1 && data.recipientId.size() <= 128 &&
+             data.senderId is string && data.senderId.size() >= 1 && data.senderId.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 80 &&
+             (!('senderAvatar' in data) || (data.senderAvatar is string && data.senderAvatar.size() <= 350000)) &&
+             data.type in ['like', 'comment', 'follow', 'announcement', 'admin_alert'] &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+             data.message is string && data.message.size() >= 1 && data.message.size() <= 400 &&
+             data.read is bool &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidReport(data) {
+      return data.reporterId is string && data.reporterId.size() >= 1 && data.reporterId.size() <= 128 &&
+             data.targetType in ['post', 'reel', 'comment', 'user', 'app'] &&
+             data.targetId is string && data.targetId.size() >= 1 && data.targetId.size() <= 128 &&
+             data.targetSummary is string && data.targetSummary.size() <= 300 &&
+             data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 160 &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 1000)) &&
+             data.status in ['pending', 'resolved', 'dismissed'] &&
+             (!('actionTaken' in data) || (data.actionTaken is string && data.actionTaken.size() <= 160)) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMediaAsset(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.mimeType is string && data.mimeType.size() >= 3 && data.mimeType.size() <= 80 &&
+             data.chunkCount is int && data.chunkCount >= 1 && data.chunkCount <= 2000 &&
+             data.totalBytes is int && data.totalBytes >= 1 && data.totalBytes <= 536870912 &&
+             (!('thumbnailData' in data) || (data.thumbnailData is string && data.thumbnailData.size() <= 350000)) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidMediaChunk(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.index is int && data.index >= 0 && data.index <= 2000 &&
+             data.data is string && data.data.size() >= 1 && data.data.size() <= 750000;
+    }
+
+    function isValidStory(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 350000)) &&
+             data.authorRole in ['student', 'teacher', 'admin'] &&
+             (!('authorIsVerified' in data) || data.authorIsVerified is bool) &&
+             (!('authorIsBlackSociety' in data) || data.authorIsBlackSociety is bool) &&
+             (!('authorBlackSocietyNumber' in data) || (data.authorBlackSocietyNumber is int && data.authorBlackSocietyNumber >= 0)) &&
+             (!('authorIsClassRepresentative' in data) || data.authorIsClassRepresentative is bool) &&
+             data.mediaUrl is string && data.mediaUrl.size() >= 1 && data.mediaUrl.size() <= 350000 &&
+             data.mediaType in ['image', 'video', 'post_card'] &&
+             data.caption is string && data.caption.size() <= 300 &&
+             (!('sharedSourceType' in data) || data.sharedSourceType in ['post', 'reel']) &&
+             (!('sharedSourceId' in data) || (data.sharedSourceId is string && data.sharedSourceId.size() >= 1 && data.sharedSourceId.size() <= 128)) &&
+             (!('sharedAuthorId' in data) || (data.sharedAuthorId is string && data.sharedAuthorId.size() >= 1 && data.sharedAuthorId.size() <= 128)) &&
+             (!('sharedAuthorName' in data) || (data.sharedAuthorName is string && data.sharedAuthorName.size() <= 80)) &&
+             (!('sharedAuthorAvatar' in data) || (data.sharedAuthorAvatar is string && data.sharedAuthorAvatar.size() <= 350000)) &&
+             (!('sharedSourceCaption' in data) || (data.sharedSourceCaption is string && data.sharedSourceCaption.size() <= 600)) &&
+             (!('musicTitle' in data) || (data.musicTitle is string && data.musicTitle.size() <= 120)) &&
+             (!('musicArtist' in data) || (data.musicArtist is string && data.musicArtist.size() <= 120)) &&
+             (!('musicArtworkUrl' in data) || (data.musicArtworkUrl is string && data.musicArtworkUrl.size() <= 500)) &&
+             (!('musicPreviewUrl' in data) || (data.musicPreviewUrl is string && data.musicPreviewUrl.size() <= 500)) &&
+             (!('musicStartSec' in data) || (data.musicStartSec is int && data.musicStartSec >= 0 && data.musicStartSec <= 60)) &&
+             (!('muteOriginalAudio' in data) || data.muteOriginalAudio is bool) &&
+             (!('videoStartMs' in data) || (data.videoStartMs is int && data.videoStartMs >= 0 && data.videoStartMs <= 3600000)) &&
+             (!('videoEndMs' in data) || (data.videoEndMs is int && data.videoEndMs >= 0 && data.videoEndMs <= 3600000)) &&
+             (!('videoSpeed' in data) || (data.videoSpeed is number && data.videoSpeed >= 0.25 && data.videoSpeed <= 3.0)) &&
+             (!('videoFilter' in data) || (data.videoFilter is string && data.videoFilter.size() <= 30)) &&
+             (!('videoOverlaysJson' in data) || (data.videoOverlaysJson is string && data.videoOverlaysJson.size() <= 8000)) &&
+             data.viewedBy is list && data.viewedBy.size() <= 500 && (data.viewedBy.size() == 0 || data.viewedBy[0] is string) &&
+             (!('likedBy' in data) || (data.likedBy is list && data.likedBy.size() <= 500 && (data.likedBy.size() == 0 || data.likedBy[0] is string))) &&
+             data.isActive is bool &&
+             isValidTimestamp(data.createdAt) &&
+             data.expiresAt is timestamp;
+    }
+
+    function isValidReel(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 350000)) &&
+             data.authorRole in ['student', 'teacher', 'admin'] &&
+             (!('authorGrade' in data) || (data.authorGrade is string && data.authorGrade.size() <= 80)) &&
+             (!('authorIsVerified' in data) || data.authorIsVerified is bool) &&
+             (!('authorIsBlackSociety' in data) || data.authorIsBlackSociety is bool) &&
+             (!('authorBlackSocietyNumber' in data) || (data.authorBlackSocietyNumber is int && data.authorBlackSocietyNumber >= 0)) &&
+             (!('authorIsClassRepresentative' in data) || data.authorIsClassRepresentative is bool) &&
+             (!('authorClassRepresentativeGrade' in data) || (data.authorClassRepresentativeGrade is int && data.authorClassRepresentativeGrade >= 0 && data.authorClassRepresentativeGrade <= 12)) &&
+             data.videoUrl is string && data.videoUrl.size() >= 1 && data.videoUrl.size() <= 350000 &&
+             (!('videoAspectRatio' in data) || data.videoAspectRatio in ['free', '1:1', '4:5', '16:9', '9:16']) &&
+             data.caption is string && data.caption.size() <= 2000 &&
+             data.category in ['Announcements', 'News', 'Academic', 'Achievements', 'Sports', 'Events', 'General'] &&
+             (!('audioTitle' in data) || (data.audioTitle is string && data.audioTitle.size() <= 120)) &&
+             (!('musicTitle' in data) || (data.musicTitle is string && data.musicTitle.size() <= 120)) &&
+             (!('musicArtist' in data) || (data.musicArtist is string && data.musicArtist.size() <= 120)) &&
+             (!('musicArtworkUrl' in data) || (data.musicArtworkUrl is string && data.musicArtworkUrl.size() <= 500)) &&
+             (!('musicPreviewUrl' in data) || (data.musicPreviewUrl is string && data.musicPreviewUrl.size() <= 500)) &&
+             (!('musicStartSec' in data) || (data.musicStartSec is int && data.musicStartSec >= 0 && data.musicStartSec <= 60)) &&
+             (!('muteOriginalAudio' in data) || data.muteOriginalAudio is bool) &&
+             data.likedBy is list && data.likedBy.size() <= 500 && (data.likedBy.size() == 0 || data.likedBy[0] is string) &&
+             (!('viewedBy' in data) || (data.viewedBy is list && data.viewedBy.size() <= 500 && (data.viewedBy.size() == 0 || data.viewedBy[0] is string))) &&
+             data.commentsCount is int && data.commentsCount >= 0 && data.commentsCount <= 100000 &&
+             data.isActive is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidReelComment(data) {
+      return data.reelId is string && data.reelId.size() >= 1 && data.reelId.size() <= 128 &&
+             data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 350000)) &&
+             data.authorRole in ['student', 'teacher', 'admin'] &&
+             (!('authorGrade' in data) || (data.authorGrade is string && data.authorGrade.size() <= 80)) &&
+             (!('authorIsVerified' in data) || data.authorIsVerified is bool) &&
+             (!('authorIsBlackSociety' in data) || data.authorIsBlackSociety is bool) &&
+             (!('authorBlackSocietyNumber' in data) || (data.authorBlackSocietyNumber is int && data.authorBlackSocietyNumber >= 0)) &&
+             (!('authorIsClassRepresentative' in data) || data.authorIsClassRepresentative is bool) &&
+             (!('authorClassRepresentativeGrade' in data) || (data.authorClassRepresentativeGrade is int && data.authorClassRepresentativeGrade >= 0 && data.authorClassRepresentativeGrade <= 12)) &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 1000 &&
+             (!('replyToCommentId' in data) || (data.replyToCommentId is string && data.replyToCommentId.size() >= 1 && data.replyToCommentId.size() <= 128)) &&
+             (!('replyToAuthorName' in data) || (data.replyToAuthorName is string && data.replyToAuthorName.size() <= 80)) &&
+             (!('replyToContent' in data) || (data.replyToContent is string && data.replyToContent.size() <= 300)) &&
+             (!('likedBy' in data) || (data.likedBy is list && data.likedBy.size() <= 500 && (data.likedBy.size() == 0 || data.likedBy[0] is string))) &&
+             isValidTimestamp(data.createdAt);
+    }
+
+    function isValidStoryHighlight(data) {
+      return data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 40 &&
+             (!('coverAvatar' in data) || (data.coverAvatar is string && data.coverAvatar.size() <= 350000)) &&
+             (!('coverEmoji' in data) || (data.coverEmoji is string && data.coverEmoji.size() <= 16)) &&
+             data.items is list && data.items.size() >= 1 && data.items.size() <= 25 &&
+             data.items[0] is map &&
+             data.items[0].mediaUrl is string && data.items[0].mediaUrl.size() >= 1 && data.items[0].mediaUrl.size() <= 350000 &&
+             data.items[0].mediaType in ['image', 'video'] &&
+             (!('caption' in data.items[0]) || (data.items[0].caption is string && data.items[0].caption.size() <= 300)) &&
+             data.isActive is bool &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidCampusNote(data) {
+      return data.authorId is string && data.authorId.size() >= 1 && data.authorId.size() <= 128 &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+             (!('authorAvatar' in data) || (data.authorAvatar is string && data.authorAvatar.size() <= 350000)) &&
+             data.text is string && data.text.size() <= 100 &&
+             (data.text.size() >= 1 || ('musicPreviewUrl' in data && data.musicPreviewUrl is string && data.musicPreviewUrl.size() >= 1)) &&
+             data.bubbleColor in ['pink', 'dark_pink', 'blue', 'purple', 'emerald', 'amber', 'dark'] &&
+             (!('musicTitle' in data) || (data.musicTitle is string && data.musicTitle.size() <= 120)) &&
+             (!('musicArtist' in data) || (data.musicArtist is string && data.musicArtist.size() <= 120)) &&
+             (!('musicArtworkUrl' in data) || (data.musicArtworkUrl is string && data.musicArtworkUrl.size() <= 500)) &&
+             (!('musicPreviewUrl' in data) || (data.musicPreviewUrl is string && data.musicPreviewUrl.size() <= 500)) &&
+             (!('musicStartSec' in data) || (data.musicStartSec is int && data.musicStartSec >= 0 && data.musicStartSec <= 60)) &&
+             data.isActive is bool &&
+             isValidTimestamp(data.createdAt) &&
+             data.expiresAt is timestamp;
+    }
+
+    function isValidAppUpdateConfig(data) {
+      return data.latestVersionCode is int && data.latestVersionCode >= 1 && data.latestVersionCode <= 100000 &&
+             data.latestVersionName is string && data.latestVersionName.size() >= 1 && data.latestVersionName.size() <= 40 &&
+             data.apkUrl is string && data.apkUrl.size() >= 10 && data.apkUrl.size() <= 1000 &&
+             data.apkUrl.matches('^https?://.*') &&
+             (!('releaseNotes' in data) || (data.releaseNotes is string && data.releaseNotes.size() <= 1000)) &&
+             data.isMandatory is bool &&
+             (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128)) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    match /admins/{uid} {
+      allow get: if isSignedIn() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isSignedIn() && isValidId(uid) && isValidAdminMarker(incoming()) && (
+        isAdmin() || (request.auth.uid == uid && isSuperAdminEmail())
+      );
+      allow delete: if isAdmin() && isValidId(uid);
+      allow update: if false;
+    }
+
+    match /campus_profiles/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().uid == request.auth.uid &&
+                       incoming().keys().hasAll(['uid', 'name', 'role', 'isApproved', 'isVerified', 'isSuspended', 'isBlackSociety', 'isClassRepresentative', 'isActive', 'createdAt', 'updatedAt']) &&
+                       isValidCampusProfile(incoming()) &&
+                       (
+                         isAdmin() ||
+                         (
+                           incoming().role in ['student', 'teacher'] &&
+                           incoming().isVerified == false &&
+                           incoming().isSuspended == false &&
+                           incoming().isBlackSociety == false &&
+                           incoming().isClassRepresentative == false &&
+                           (incoming().role == 'student' ? incoming().isApproved == true : incoming().isApproved == false)
+                         )
+                       );
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidCampusProfile(incoming()) &&
+                       incoming().uid == existing().uid &&
+                       ((!('createdAt' in existing()) && isValidTimestamp(incoming().createdAt)) || incoming().createdAt == existing().createdAt) &&
+                       (
+                         isAdmin() ||
+                         (
+                           request.auth.uid == userId &&
+                           incoming().role == existing().role &&
+                           incoming().isApproved == existing().isApproved &&
+                           incoming().isVerified == existing().isVerified &&
+                           incoming().isSuspended == existing().isSuspended &&
+                           incoming().isBlackSociety == existing().isBlackSociety &&
+                           incoming().isClassRepresentative == existing().isClassRepresentative &&
+                           (!('gradeLocked' in existing()) || !existing().gradeLocked || incoming().grade == existing().grade) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'grade', 'gradeLocked', 'avatar', 'bio', 'isPrivateAccount', 'lastSeenAt', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /users/{userId}/private/{docId} {
+      allow get: if isSignedIn() && isValidId(userId) && isValidId(docId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(docId) &&
+                       (request.auth.uid == userId || isAdmin()) &&
+                       incoming().userId == userId &&
+                       incoming().keys().hasAll(['userId', 'email', 'createdAt', 'updatedAt']) &&
+                       isValidUserPrivateInfo(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidId(docId) &&
+                       (request.auth.uid == userId || isAdmin()) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidUserPrivateInfo(incoming());
+
+      allow delete: if isSignedIn() && isValidId(userId) && isValidId(docId) && (request.auth.uid == userId || isAdmin());
+    }
+
+    match /campus_follows/{followId} {
+      allow get: if isSignedIn() && isValidId(followId);
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(followId) &&
+                       incoming().followerId == request.auth.uid &&
+                       incoming().targetId != request.auth.uid &&
+                       incoming().isActive == true &&
+                       incoming().keys().hasAll(['followerId', 'targetId', 'isActive', 'createdAt']) &&
+                       isValidFollow(incoming()) &&
+                       exists(/databases/$(database)/documents/campus_profiles/$(incoming().targetId));
+
+      allow delete: if isSignedIn() && isValidId(followId) && (resource.data.followerId == request.auth.uid || isAdmin());
+      allow update: if false;
+    }
+
+    match /posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId);
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(postId) &&
+                       (isAdmin() || notSuspended()) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().keys().hasAll(['authorId', 'authorName', 'authorRole', 'content', 'category', 'isOfficial', 'isPinned', 'likedBy', 'commentsCount', 'isActive', 'createdAt', 'updatedAt']) &&
+                       isValidPost(incoming()) &&
+                       (isAdmin() || !('images' in incoming()) || incoming().images.size() <= 10) &&
+                       (isAdmin() || (!incoming().isPinned && !incoming().isOfficial && incoming().authorRole != 'admin'));
+
+      allow update: if isSignedIn() &&
+                       isValidId(postId) &&
+                       isValidPost(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           notSuspended() &&
+                           request.auth.uid == existing().authorId &&
+                           existing().isOfficial == false &&
+                           existing().isPinned == false &&
+                           existing().authorRole != 'admin' &&
+                           incoming().isPinned == existing().isPinned &&
+                           incoming().isOfficial == existing().isOfficial &&
+                           incoming().authorRole == existing().authorRole &&
+                           (!('images' in incoming()) || incoming().images.size() <= 10) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'images', 'imageAspectRatio', 'musicTitle', 'musicArtist', 'musicArtworkUrl', 'musicPreviewUrl', 'musicStartSec', 'updatedAt'])
+                         ) ||
+                         (
+                           notSuspended() &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['likedBy', 'commentsCount', 'viewedBy', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(postId) &&
+                       (
+                         isAdmin() ||
+                         (
+                           resource.data.authorId == request.auth.uid &&
+                           resource.data.isOfficial == false &&
+                           resource.data.isPinned == false &&
+                           resource.data.authorRole != 'admin'
+                         )
+                       );
+
+      match /comments/{commentId} {
+        allow get: if isSignedIn() && isValidId(postId) && isValidId(commentId);
+        allow list: if isSignedIn() && isValidId(postId) && resource.data.postId == postId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(postId) &&
+                         isValidId(commentId) &&
+                         (isAdmin() || notSuspended()) &&
+                         incoming().postId == postId &&
+                         incoming().authorId == request.auth.uid &&
+                         incoming().keys().hasAll(['postId', 'authorId', 'authorName', 'authorRole', 'content', 'createdAt']) &&
+                         isValidComment(incoming()) &&
+                         (isAdmin() || incoming().authorRole != 'admin') &&
+                         exists(/databases/$(database)/documents/posts/$(postId));
+
+        allow update: if isSignedIn() && isValidId(postId) && isValidId(commentId) && (
+          (isAdmin() && isValidComment(incoming())) ||
+          (
+            notSuspended() &&
+            isValidComment(incoming()) &&
+            incoming().postId == existing().postId &&
+            incoming().authorId == existing().authorId &&
+            incoming().createdAt == existing().createdAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['likedBy'])
+          )
+        );
+        allow delete: if isSignedIn() && isValidId(postId) && isValidId(commentId) && (resource.data.authorId == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && (request.auth.uid in resource.data.participants);
+      allow list: if isSignedIn() && (request.auth.uid in resource.data.participants);
+
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       (isAdmin() || notSuspended()) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().senderId != incoming().recipientId &&
+                       (incoming().senderId in incoming().participants) &&
+                       (incoming().recipientId in incoming().participants) &&
+                       incoming().keys().hasAll(['senderId', 'recipientId', 'participants', 'content', 'read', 'edited', 'reactions', 'createdAt', 'updatedAt']) &&
+                       isValidMessage(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       (request.auth.uid in existing().participants) &&
+                       incoming().senderId == existing().senderId &&
+                       incoming().recipientId == existing().recipientId &&
+                       incoming().participants == existing().participants &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidMessage(incoming()) &&
+                       (
+                         (
+                           request.auth.uid == existing().senderId &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['content', 'edited', 'reactions', 'updatedAt'])
+                         ) ||
+                         (
+                           request.auth.uid == existing().recipientId &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['read', 'reactions', 'updatedAt'])
+                         ) ||
+                         (
+                           incoming().diff(existing()).affectedKeys().hasOnly(['reactions', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(messageId) && (resource.data.senderId == request.auth.uid || isAdmin());
+    }
+
+    match /typing_status/{pairId} {
+      allow get: if isSignedIn() && isValidId(pairId) && (request.auth.uid in resource.data.participants);
+      allow list: if isSignedIn() && (request.auth.uid in resource.data.participants);
+
+      allow create: if isSignedIn() &&
+                       isValidId(pairId) &&
+                       incoming().senderId == request.auth.uid &&
+                       (request.auth.uid in incoming().participants) &&
+                       isValidTypingStatus(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(pairId) &&
+                       incoming().senderId == request.auth.uid &&
+                       existing().senderId == request.auth.uid &&
+                       incoming().recipientId == existing().recipientId &&
+                       isValidTypingStatus(incoming());
+
+      allow delete: if isSignedIn() && isValidId(pairId) && (resource.data.senderId == request.auth.uid || isAdmin());
+    }
+
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && isValidId(notificationId) && (resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.recipientId == request.auth.uid || resource.data.senderId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       incoming().senderId == request.auth.uid &&
+                       incoming().keys().hasAll(['recipientId', 'senderId', 'senderName', 'type', 'title', 'message', 'read', 'createdAt']) &&
+                       isValidNotification(incoming()) &&
+                       (incoming().type != 'admin_alert' || isAdmin());
+
+      allow update: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       incoming().recipientId == existing().recipientId &&
+                       incoming().senderId == existing().senderId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidNotification(incoming()) &&
+                       (
+                         (resource.data.recipientId == request.auth.uid &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['read'])) ||
+                         (resource.data.senderId == request.auth.uid &&
+                          incoming().read == existing().read &&
+                          incoming().diff(existing()).affectedKeys().hasOnly(['senderAvatar']))
+                       );
+
+      allow delete: if isSignedIn() && isValidId(notificationId) && (resource.data.recipientId == request.auth.uid || isAdmin());
+    }
+
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && (resource.data.reporterId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.reporterId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(reportId) &&
+                       incoming().reporterId == request.auth.uid &&
+                       incoming().status == 'pending' &&
+                       incoming().keys().hasAll(['reporterId', 'targetType', 'targetId', 'targetSummary', 'reason', 'status', 'createdAt', 'updatedAt']) &&
+                       isValidReport(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(reportId) &&
+                       isAdmin() &&
+                       existing().status == 'pending' &&
+                       incoming().reporterId == existing().reporterId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidReport(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'actionTaken', 'updatedAt']);
+
+      allow delete: if isSignedIn() && isValidId(reportId) && isAdmin();
+    }
+
+    match /media_assets/{assetId} {
+      allow get, list: if isSignedIn() && isValidId(assetId);
+      allow create: if isSignedIn() &&
+                       isValidId(assetId) &&
+                       (isAdmin() || notSuspended()) &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().keys().hasAll(['ownerId', 'mimeType', 'chunkCount', 'totalBytes', 'createdAt']) &&
+                       isValidMediaAsset(incoming()) &&
+                       (isAdmin() || (incoming().chunkCount <= 75 && incoming().totalBytes <= 26214400));
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(assetId) && (resource.data.ownerId == request.auth.uid || isAdmin());
+
+      match /chunks/{chunkIndex} {
+        allow get, list: if isSignedIn() && isValidId(assetId);
+        allow create: if isSignedIn() &&
+                         isValidId(assetId) &&
+                         (isAdmin() || notSuspended()) &&
+                         incoming().ownerId == request.auth.uid &&
+                         incoming().keys().hasAll(['ownerId', 'index', 'data']) &&
+                         isValidMediaChunk(incoming());
+        allow update: if false;
+        allow delete: if isSignedIn() && isValidId(assetId) && (resource.data.ownerId == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /stories/{storyId} {
+      allow get: if isSignedIn() && isValidId(storyId) && (
+        isAdmin() ||
+        resource.data.authorId == request.auth.uid ||
+        exists(/databases/$(database)/documents/campus_follows/$(request.auth.uid + '_' + resource.data.authorId)) ||
+        (
+          exists(/databases/$(database)/documents/campus_profiles/$(resource.data.authorId)) &&
+          (
+            !('isPrivateAccount' in get(/databases/$(database)/documents/campus_profiles/$(resource.data.authorId)).data) ||
+            get(/databases/$(database)/documents/campus_profiles/$(resource.data.authorId)).data.isPrivateAccount != true
+          )
+        )
+      );
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(storyId) &&
+                       (isAdmin() || notSuspended()) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().isActive == true &&
+                       incoming().viewedBy.size() == 0 &&
+                       (!('likedBy' in incoming()) || incoming().likedBy.size() == 0) &&
+                       incoming().keys().hasAll(['authorId', 'authorName', 'authorRole', 'mediaUrl', 'mediaType', 'caption', 'viewedBy', 'isActive', 'createdAt', 'expiresAt']) &&
+                       isValidStory(incoming()) &&
+                       (isAdmin() || incoming().authorRole != 'admin') &&
+                       incoming().expiresAt > request.time;
+
+      allow update: if isSignedIn() &&
+                       isValidId(storyId) &&
+                       isValidStory(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().expiresAt == existing().expiresAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           notSuspended() &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['viewedBy', 'likedBy'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(storyId) && (resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    match /story_highlights/{highlightId} {
+      allow get: if isSignedIn() && isValidId(highlightId);
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(highlightId) &&
+                       (isAdmin() || notSuspended()) &&
+                       incoming().ownerId == request.auth.uid &&
+                       incoming().isActive == true &&
+                       incoming().keys().hasAll(['ownerId', 'title', 'items', 'isActive', 'createdAt', 'updatedAt']) &&
+                       isValidStoryHighlight(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(highlightId) &&
+                       isValidStoryHighlight(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           notSuspended() &&
+                           request.auth.uid == existing().ownerId
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(highlightId) && (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /reels/{reelId} {
+      allow get: if isSignedIn() && isValidId(reelId);
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(reelId) &&
+                       (isAdmin() || notSuspended()) &&
+                       incoming().authorId == request.auth.uid &&
+                       incoming().keys().hasAll(['authorId', 'authorName', 'authorRole', 'videoUrl', 'caption', 'category', 'likedBy', 'commentsCount', 'isActive', 'createdAt', 'updatedAt']) &&
+                       isValidReel(incoming()) &&
+                       (isAdmin() || incoming().authorRole != 'admin');
+
+      allow update: if isSignedIn() &&
+                       isValidId(reelId) &&
+                       isValidReel(incoming()) &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         isAdmin() ||
+                         (
+                           notSuspended() &&
+                           request.auth.uid == existing().authorId &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'category', 'audioTitle', 'videoAspectRatio', 'musicTitle', 'musicArtist', 'musicArtworkUrl', 'musicPreviewUrl', 'musicStartSec', 'muteOriginalAudio', 'updatedAt'])
+                         ) ||
+                         (
+                           notSuspended() &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['likedBy', 'commentsCount', 'viewedBy', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(reelId) && (resource.data.authorId == request.auth.uid || isAdmin());
+
+      match /comments/{commentId} {
+        allow get: if isSignedIn() && isValidId(reelId) && isValidId(commentId);
+        allow list: if isSignedIn() && isValidId(reelId) && resource.data.reelId == reelId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(reelId) &&
+                         isValidId(commentId) &&
+                         (isAdmin() || notSuspended()) &&
+                         incoming().reelId == reelId &&
+                         incoming().authorId == request.auth.uid &&
+                         incoming().keys().hasAll(['reelId', 'authorId', 'authorName', 'authorRole', 'content', 'createdAt']) &&
+                         isValidReelComment(incoming()) &&
+                         (isAdmin() || incoming().authorRole != 'admin') &&
+                         exists(/databases/$(database)/documents/reels/$(reelId));
+
+        allow update: if isSignedIn() && isValidId(reelId) && isValidId(commentId) && (
+          (isAdmin() && isValidReelComment(incoming())) ||
+          (
+            notSuspended() &&
+            isValidReelComment(incoming()) &&
+            incoming().reelId == existing().reelId &&
+            incoming().authorId == existing().authorId &&
+            incoming().createdAt == existing().createdAt &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['likedBy'])
+          )
+        );
+        allow delete: if isSignedIn() && isValidId(reelId) && isValidId(commentId) && (resource.data.authorId == request.auth.uid || isAdmin());
+      }
+    }
+
+    match /campus_notes/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (
+        isAdmin() ||
+        request.auth.uid == userId ||
+        (
+          exists(/databases/$(database)/documents/campus_follows/$(request.auth.uid + '_' + userId)) &&
+          exists(/databases/$(database)/documents/campus_follows/$(userId + '_' + request.auth.uid))
+        )
+      );
+      allow list: if isSignedIn() && resource.data.isActive == true;
+
+      allow create, update: if isSignedIn() &&
+                               isValidId(userId) &&
+                               request.auth.uid == userId &&
+                               (isAdmin() || notSuspended()) &&
+                               incoming().authorId == request.auth.uid &&
+                               incoming().isActive == true &&
+                               incoming().keys().hasAll(['authorId', 'authorName', 'text', 'bubbleColor', 'isActive', 'createdAt', 'expiresAt']) &&
+                               isValidCampusNote(incoming()) &&
+                               incoming().expiresAt > request.time;
+
+      allow delete: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+    }
+
+    match /app_config/{configId} {
+      allow get, list: if isSignedIn() && isValidId(configId);
+      allow create, update: if isAdmin() &&
+                               isValidId(configId) &&
+                               incoming().keys().hasAll(['latestVersionCode', 'latestVersionName', 'apkUrl', 'isMandatory', 'updatedAt']) &&
+                               isValidAppUpdateConfig(incoming());
+      allow delete: if isAdmin() && isValidId(configId);
+    }
+  }
+}

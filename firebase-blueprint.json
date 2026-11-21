@@ -1,0 +1,469 @@
+{
+  "entities": {
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted admin role assignment record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "createdAt"]
+    },
+    "CampusProfile": {
+      "title": "CampusProfile",
+      "description": "Public campus directory profile without PII",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin"] },
+        "grade": { "type": "string" },
+        "gradeLocked": { "type": "boolean" },
+        "avatar": { "type": "string" },
+        "bio": { "type": "string" },
+        "isApproved": { "type": "boolean" },
+        "isVerified": { "type": "boolean" },
+        "isSuspended": { "type": "boolean" },
+        "isBlackSociety": { "type": "boolean" },
+        "blackSocietyNumber": { "type": "integer" },
+        "isClassRepresentative": { "type": "boolean" },
+        "classRepresentativeGrade": { "type": "integer" },
+        "isPrivateAccount": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastSeenAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "role", "isApproved", "isVerified", "isSuspended", "isBlackSociety", "isClassRepresentative", "isActive", "createdAt", "updatedAt"]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Private PII, settings preferences, bookmarks, and blocklist scoped to owner/admin",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "language": { "type": "string" },
+        "feedLayoutMode": { "type": "string" },
+        "hideLikeCounts": { "type": "boolean" },
+        "isPrivateAccount": { "type": "boolean" },
+        "pushLikes": { "type": "boolean" },
+        "pushComments": { "type": "boolean" },
+        "pushAnnouncements": { "type": "boolean" },
+        "dataSaver": { "type": "boolean" },
+        "highQualityMedia": { "type": "boolean" },
+        "savedPostIds": { "type": "array" },
+        "savedReelIds": { "type": "array" },
+        "archivedPostIds": { "type": "array" },
+        "blockedUserIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "createdAt", "updatedAt"]
+    },
+    "CampusFollow": {
+      "title": "CampusFollow",
+      "description": "Follow edge between two campus members",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string" },
+        "targetId": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["followerId", "targetId", "isActive", "createdAt"]
+    },
+    "CampusPost": {
+      "title": "CampusPost",
+      "description": "Campus feed post or official notice",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorGrade": { "type": "string" },
+        "authorIsVerified": { "type": "boolean" },
+        "authorIsBlackSociety": { "type": "boolean" },
+        "authorBlackSocietyNumber": { "type": "integer" },
+        "authorIsClassRepresentative": { "type": "boolean" },
+        "authorClassRepresentativeGrade": { "type": "integer" },
+        "content": { "type": "string" },
+        "category": { "type": "string", "enum": ["Announcements", "News", "Academic", "Achievements", "Sports", "Events", "General"] },
+        "images": { "type": "array" },
+        "imageAspectRatio": { "type": "string", "enum": ["free", "1:1", "4:5", "16:9", "9:16"] },
+        "musicTitle": { "type": "string" },
+        "musicArtist": { "type": "string" },
+        "musicArtworkUrl": { "type": "string" },
+        "musicPreviewUrl": { "type": "string" },
+        "musicStartSec": { "type": "integer" },
+        "isOfficial": { "type": "boolean" },
+        "isPinned": { "type": "boolean" },
+        "likedBy": { "type": "array" },
+        "viewedBy": { "type": "array" },
+        "commentsCount": { "type": "integer" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorRole", "content", "category", "isOfficial", "isPinned", "likedBy", "commentsCount", "isActive", "createdAt", "updatedAt"]
+    },
+    "CampusComment": {
+      "title": "CampusComment",
+      "description": "Comment under a campus post",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorGrade": { "type": "string" },
+        "authorIsVerified": { "type": "boolean" },
+        "authorIsBlackSociety": { "type": "boolean" },
+        "authorBlackSocietyNumber": { "type": "integer" },
+        "authorIsClassRepresentative": { "type": "boolean" },
+        "authorClassRepresentativeGrade": { "type": "integer" },
+        "content": { "type": "string" },
+        "replyToCommentId": { "type": "string" },
+        "replyToAuthorName": { "type": "string" },
+        "replyToContent": { "type": "string" },
+        "likedBy": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["postId", "authorId", "authorName", "authorRole", "content", "createdAt"]
+    },
+    "DirectMessage": {
+      "title": "DirectMessage",
+      "description": "Direct message between two campus participants",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "participants": { "type": "array" },
+        "content": { "type": "string" },
+        "mediaData": { "type": "string" },
+        "audioData": { "type": "string" },
+        "audioDurationSec": { "type": "integer" },
+        "storyId": { "type": "string" },
+        "storyAuthorName": { "type": "string" },
+        "storyMediaUrl": { "type": "string" },
+        "storyMediaType": { "type": "string" },
+        "storyCaption": { "type": "string" },
+        "replyToMessageId": { "type": "string" },
+        "replyToSenderId": { "type": "string" },
+        "replyToSenderName": { "type": "string" },
+        "replyToContent": { "type": "string" },
+        "replyToMediaType": { "type": "string" },
+        "read": { "type": "boolean" },
+        "edited": { "type": "boolean" },
+        "reactions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "recipientId", "participants", "content", "read", "edited", "reactions", "createdAt", "updatedAt"]
+    },
+    "TypingStatus": {
+      "title": "TypingStatus",
+      "description": "Real-time typing indicator state between sender and recipient",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "participants": { "type": "array" },
+        "isTyping": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "recipientId", "participants", "isTyping", "updatedAt"]
+    },
+    "CampusNotification": {
+      "title": "CampusNotification",
+      "description": "Activity alert notification addressed to a specific user",
+      "type": "object",
+      "properties": {
+        "recipientId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderAvatar": { "type": "string" },
+        "type": { "type": "string", "enum": ["like", "comment", "follow", "announcement", "admin_alert"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientId", "senderId", "senderName", "type", "title", "message", "read", "createdAt"]
+    },
+    "CampusReport": {
+      "title": "CampusReport",
+      "description": "Moderation report ticket for posts, comments, or users",
+      "type": "object",
+      "properties": {
+        "reporterId": { "type": "string" },
+        "targetType": { "type": "string", "enum": ["post", "comment", "user"] },
+        "targetId": { "type": "string" },
+        "targetSummary": { "type": "string" },
+        "reason": { "type": "string" },
+        "details": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] },
+        "actionTaken": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reporterId", "targetType", "targetId", "targetSummary", "reason", "status", "createdAt", "updatedAt"]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Metadata manifest for chunked campus images and videos",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "chunkCount": { "type": "integer" },
+        "totalBytes": { "type": "integer" },
+        "thumbnailData": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "mimeType", "chunkCount", "totalBytes", "createdAt"]
+    },
+    "MediaChunk": {
+      "title": "MediaChunk",
+      "description": "Ordered Base64 media chunk belonging to a MediaAsset",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "index": { "type": "integer" },
+        "data": { "type": "string" }
+      },
+      "required": ["ownerId", "index", "data"]
+    },
+    "CampusStory": {
+      "title": "CampusStory",
+      "description": "24-hour Instagram-style story visible to followers and author",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorIsVerified": { "type": "boolean" },
+        "authorIsBlackSociety": { "type": "boolean" },
+        "authorBlackSocietyNumber": { "type": "integer" },
+        "authorIsClassRepresentative": { "type": "boolean" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["image", "video", "post_card"] },
+        "caption": { "type": "string" },
+        "sharedSourceType": { "type": "string", "enum": ["post", "reel"] },
+        "sharedSourceId": { "type": "string" },
+        "sharedAuthorId": { "type": "string" },
+        "sharedAuthorName": { "type": "string" },
+        "sharedAuthorAvatar": { "type": "string" },
+        "sharedSourceCaption": { "type": "string" },
+        "musicTitle": { "type": "string" },
+        "musicArtist": { "type": "string" },
+        "musicArtworkUrl": { "type": "string" },
+        "musicPreviewUrl": { "type": "string" },
+        "musicStartSec": { "type": "integer" },
+        "muteOriginalAudio": { "type": "boolean" },
+        "videoStartMs": { "type": "integer" },
+        "videoEndMs": { "type": "integer" },
+        "videoSpeed": { "type": "number" },
+        "videoFilter": { "type": "string" },
+        "videoOverlaysJson": { "type": "string" },
+        "viewedBy": { "type": "array" },
+        "likedBy": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorRole", "mediaUrl", "mediaType", "caption", "viewedBy", "isActive", "createdAt", "expiresAt"]
+    },
+    "CampusReel": {
+      "title": "CampusReel",
+      "description": "Instagram-style vertical short video reel",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorGrade": { "type": "string" },
+        "authorIsVerified": { "type": "boolean" },
+        "authorIsBlackSociety": { "type": "boolean" },
+        "authorBlackSocietyNumber": { "type": "integer" },
+        "authorIsClassRepresentative": { "type": "boolean" },
+        "authorClassRepresentativeGrade": { "type": "integer" },
+        "videoUrl": { "type": "string" },
+        "videoAspectRatio": { "type": "string", "enum": ["free", "1:1", "4:5", "16:9", "9:16"] },
+        "caption": { "type": "string" },
+        "category": { "type": "string", "enum": ["Announcements", "News", "Academic", "Achievements", "Sports", "Events", "General"] },
+        "audioTitle": { "type": "string" },
+        "musicTitle": { "type": "string" },
+        "musicArtist": { "type": "string" },
+        "musicArtworkUrl": { "type": "string" },
+        "musicPreviewUrl": { "type": "string" },
+        "musicStartSec": { "type": "integer" },
+        "muteOriginalAudio": { "type": "boolean" },
+        "likedBy": { "type": "array" },
+        "viewedBy": { "type": "array" },
+        "commentsCount": { "type": "integer" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "authorRole", "videoUrl", "caption", "category", "likedBy", "commentsCount", "isActive", "createdAt", "updatedAt"]
+    },
+    "ReelComment": {
+      "title": "ReelComment",
+      "description": "Comment under a campus reel",
+      "type": "object",
+      "properties": {
+        "reelId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "authorGrade": { "type": "string" },
+        "authorIsVerified": { "type": "boolean" },
+        "authorIsBlackSociety": { "type": "boolean" },
+        "authorBlackSocietyNumber": { "type": "integer" },
+        "authorIsClassRepresentative": { "type": "boolean" },
+        "authorClassRepresentativeGrade": { "type": "integer" },
+        "content": { "type": "string" },
+        "replyToCommentId": { "type": "string" },
+        "replyToAuthorName": { "type": "string" },
+        "replyToContent": { "type": "string" },
+        "likedBy": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["reelId", "authorId", "authorName", "authorRole", "content", "createdAt"]
+    },
+    "StoryHighlight": {
+      "title": "StoryHighlight",
+      "description": "User-created profile story highlight with custom cover avatar",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "title": { "type": "string" },
+        "coverAvatar": { "type": "string" },
+        "coverEmoji": { "type": "string" },
+        "items": { "type": "array" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "title", "items", "isActive", "createdAt", "updatedAt"]
+    },
+    "CampusNote": {
+      "title": "CampusNote",
+      "description": "24-hour Instagram-style chat note with colored thought bubble and optional song visible to mutual followers",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorAvatar": { "type": "string" },
+        "text": { "type": "string" },
+        "bubbleColor": { "type": "string", "enum": ["pink", "dark_pink", "blue", "purple", "emerald", "amber", "dark"] },
+        "musicTitle": { "type": "string" },
+        "musicArtist": { "type": "string" },
+        "musicArtworkUrl": { "type": "string" },
+        "musicPreviewUrl": { "type": "string" },
+        "musicStartSec": { "type": "integer" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "text", "bubbleColor", "isActive", "createdAt", "expiresAt"]
+    },
+    "AppUpdateConfig": {
+      "title": "AppUpdateConfig",
+      "description": "In-app APK release metadata published by administrators",
+      "type": "object",
+      "properties": {
+        "latestVersionCode": { "type": "integer" },
+        "latestVersionName": { "type": "string" },
+        "apkUrl": { "type": "string" },
+        "releaseNotes": { "type": "string" },
+        "isMandatory": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["latestVersionCode", "latestVersionName", "apkUrl", "isMandatory", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{uid}": {
+      "schema": { "$ref": "#/entities/AdminMarker" },
+      "description": "Trusted admin role documents"
+    },
+    "/campus_profiles/{userId}": {
+      "schema": { "$ref": "#/entities/CampusProfile" },
+      "description": "Public campus member profiles"
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Private PII and user settings isolated per user"
+    },
+    "/campus_follows/{followId}": {
+      "schema": { "$ref": "#/entities/CampusFollow" },
+      "description": "Campus follow graph edges"
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/CampusPost" },
+      "description": "Campus social posts and official announcements"
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/CampusComment" },
+      "description": "Comments belonging to a campus post"
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/DirectMessage" },
+      "description": "Direct messages between campus members"
+    },
+    "/typing_status/{pairId}": {
+      "schema": { "$ref": "#/entities/TypingStatus" },
+      "description": "Typing indicators scoped by participant pair"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/CampusNotification" },
+      "description": "User activity notifications"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/CampusReport" },
+      "description": "Moderation reports submitted by campus members"
+    },
+    "/media_assets/{assetId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Metadata for uploaded photos and videos"
+    },
+    "/media_assets/{assetId}/chunks/{chunkIndex}": {
+      "schema": { "$ref": "#/entities/MediaChunk" },
+      "description": "Ordered binary chunks for uploaded media assets"
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "#/entities/CampusStory" },
+      "description": "24-hour campus photo and video stories"
+    },
+    "/story_highlights/{highlightId}": {
+      "schema": { "$ref": "#/entities/StoryHighlight" },
+      "description": "User-created profile story highlights with custom cover avatars"
+    },
+    "/reels/{reelId}": {
+      "schema": { "$ref": "#/entities/CampusReel" },
+      "description": "Campus vertical video reels"
+    },
+    "/reels/{reelId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/ReelComment" },
+      "description": "Comments belonging to a campus reel"
+    },
+    "/campus_notes/{userId}": {
+      "schema": { "$ref": "#/entities/CampusNote" },
+      "description": "24-hour chat status notes visible to mutual followers"
+    },
+    "/app_config/{configId}": {
+      "schema": { "$ref": "#/entities/AppUpdateConfig" },
+      "description": "Remote app update release metadata editable by administrators"
+    }
+  }
+}

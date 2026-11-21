@@ -1,0 +1,8 @@
+{
+  "name": "Squadify",
+  "description": "Squadify — the dedicated digital student, faculty, and social community platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
