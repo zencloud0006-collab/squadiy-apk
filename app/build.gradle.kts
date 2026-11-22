@@ -31,6 +31,7 @@ val mediaTokenEndpointUrl: String by lazy {
         .removeSurrounding("\"")
         .removeSurrounding("'")
         .trim()
+        .ifBlank { "https://squadiy-apk-vercel-backend.vercel.app/api/blob-token" }
 }
 
 android {
