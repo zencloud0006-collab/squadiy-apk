@@ -1,14 +1,10 @@
 import { generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-export const config = {
-  runtime: 'edge',
-};
-
 const FIREBASE_PROJECT_ID =
   process.env.FIREBASE_PROJECT_ID?.trim() || 'gen-lang-client-0409270927';
 
-// Cached module-level JWKS avoids heavy firebase-admin cold starts (<1ms warm verify)
+// Module-cached JWKS keeps warm Firebase ID token verification under ~1ms without firebase-admin
 const FIREBASE_JWKS = createRemoteJWKSet(
   new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'),
   { cacheMaxAge: 6 * 60 * 60 * 1000, cooldownDuration: 30 * 1000 }
@@ -70,11 +66,11 @@ async function verifyFirebaseUser(authHeader: string | null): Promise<string> {
   return uid;
 }
 
-export default async function handler(request: Request): Promise<Response> {
-  if (request.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405);
-  }
+export async function GET(): Promise<Response> {
+  return jsonResponse({ status: 'ok', message: 'Send POST with Firebase ID token to mint upload tokens.' }, 200);
+}
 
+export async function POST(request: Request): Promise<Response> {
   const rwToken = process.env.BLOB_READ_WRITE_TOKEN?.trim();
   if (!rwToken) {
     return jsonResponse(
