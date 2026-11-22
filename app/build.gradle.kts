@@ -1,9 +1,19 @@
 import java.time.Duration
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.services)
+}
+
+val blobReadWriteToken: String by lazy {
+    val envFile = rootProject.file(".env")
+    val fromEnvFile = if (envFile.exists()) {
+        Properties().apply { envFile.inputStream().use { load(it) } }.getProperty("BLOB_READ_WRITE_TOKEN")
+    } else null
+    val raw = fromEnvFile ?: System.getenv("BLOB_READ_WRITE_TOKEN") ?: ""
+    raw.trim().let { if (it == "BLOB_READ_WRITE_TOKEN_PLACEHOLDER") "" else it }
 }
 
 android {
@@ -14,10 +24,11 @@ android {
         applicationId = "com.bsdcampus.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.7.0"
+        versionCode = 5
+        versionName = "2.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "BLOB_READ_WRITE_TOKEN", "\"${blobReadWriteToken.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     signingConfigs {

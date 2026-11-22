@@ -150,8 +150,6 @@ fun CreatePostScreen(
     var editingPhotoIndex by remember { mutableStateOf<Int?>(null) }
     val selectedMedia = remember { mutableStateListOf<StagedDraftMediaInput>() }
 
-    val maxRegularMedia = 10
-
     val pickReelVideo = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -164,22 +162,7 @@ fun CreatePostScreen(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            val allowedUris = if (isAdmin) {
-                uris
-            } else {
-                val remaining = (maxRegularMedia - selectedMedia.size).coerceAtLeast(0)
-                if (remaining == 0) {
-                    onShowToast("Maximum $maxRegularMedia photos/videos per post for students & teachers.")
-                    emptyList()
-                } else {
-                    if (uris.size > remaining) {
-                        onShowToast("Added first $remaining items (max $maxRegularMedia per post).")
-                    }
-                    uris.take(remaining)
-                }
-            }
-            allowedUris.forEach { uri ->
-                if (!isAdmin && selectedMedia.size >= maxRegularMedia) return@forEach
+            uris.forEach { uri ->
                 val isVideo = MediaUtils.isVideoContentUri(context, uri)
                 selectedMedia.add(
                     StagedDraftMediaInput(
@@ -237,7 +220,7 @@ fun CreatePostScreen(
                     Text(
                         text = buildString {
                             append(currentUser.grade ?: currentUser.role.replaceFirstChar { it.uppercase() })
-                            if (isAdmin) append(" • Unlimited Photos & Videos")
+                            append(" • Unlimited Photos & Videos")
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -322,11 +305,10 @@ fun CreatePostScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = when {
-                            isReelMode && isAdmin -> "Reel mode: unlimited video size & background upload"
-                            isReelMode -> "Reel mode: short vertical video (max 25 MB, uploads in background)"
-                            isAdmin -> "Admin mode: unlimited photos & videos • background upload"
-                            else -> "Photos & videos (up to $maxRegularMedia, max 25 MB/video • background upload)"
+                        text = if (isReelMode) {
+                            "Reel mode: unlimited video size & background upload"
+                        } else {
+                            "Unlimited photos & videos • background upload"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -458,7 +440,6 @@ fun CreatePostScreen(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                                 )
                             },
-                            enabled = isAdmin || selectedMedia.size < maxRegularMedia,
                             shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                             modifier = Modifier
@@ -470,12 +451,10 @@ fun CreatePostScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(Icons.Outlined.VideoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            val countLabel = if (isAdmin) {
-                                "Add Photos & Videos (${selectedMedia.size} • Unlimited)"
-                            } else {
-                                "Add Photos / Videos (${selectedMedia.size}/$maxRegularMedia)"
-                            }
-                            Text(countLabel, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = "Add Photos & Videos (${selectedMedia.size} • Unlimited)",
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
 
                         if (selectedMedia.isNotEmpty()) {

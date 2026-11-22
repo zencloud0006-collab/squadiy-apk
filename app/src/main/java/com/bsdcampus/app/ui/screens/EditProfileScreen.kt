@@ -105,17 +105,18 @@ fun EditProfileScreen(
             avatarErrorMessage = null
             avatarStatusMessage = "Optimizing & uploading profile photo..."
             scope.launch {
-                val compressed = MediaUtils.compressUriToDataUrl(context, uri, maxDimension = 512)
-                val resolvedAvatar = compressed ?: CampusMediaRepository.uploadPickedMediaUri(
+                val uploadRes = CampusMediaRepository.uploadPickedMediaUri(
                     context = context,
                     uri = uri,
                     isAdmin = isAdmin
-                ).getOrNull()
+                )
+                val resolvedAvatar = uploadRes.getOrNull()
 
                 if (resolvedAvatar.isNullOrBlank()) {
                     isUploadingAvatar = false
                     avatarStatusMessage = null
-                    val err = "Could not process selected image. Try another photo."
+                    val err = uploadRes.exceptionOrNull()?.localizedMessage
+                        ?: "Could not upload selected image. Try another photo."
                     avatarErrorMessage = err
                     onShowToast(err)
                     return@launch

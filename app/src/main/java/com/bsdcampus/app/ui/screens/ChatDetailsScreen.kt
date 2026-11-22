@@ -151,6 +151,8 @@ fun ChatDetailsScreen(
     peer: CampusUser,
     threadMessages: List<DirectMessage>,
     chatPreference: ChatPreference?,
+    defaultBackgroundPreset: String = ChatBackgroundPreset.DEFAULT.key,
+    defaultBackgroundImage: String? = null,
     isBlocked: Boolean,
     onBack: () -> Unit,
     onOpenPeerProfile: () -> Unit,
@@ -171,6 +173,8 @@ fun ChatDetailsScreen(
     val displayPeerName = if (peer.isBlackSociety) realPeerName else (activeNickname ?: realPeerName)
     val activePreset = ChatBackgroundPreset.fromKey(chatPreference?.backgroundPreset)
     val hasCustomImageBg = !chatPreference?.backgroundImage.isNullOrBlank()
+    val defaultPreset = ChatBackgroundPreset.fromKey(defaultBackgroundPreset)
+    val hasDefaultCustomImageBg = !defaultBackgroundImage.isNullOrBlank()
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showNicknameDialog by remember { mutableStateOf(false) }
@@ -497,8 +501,10 @@ fun ChatDetailsScreen(
                                     )
                                     Text(
                                         text = when {
-                                            hasCustomImageBg -> "Custom wallpaper photo"
-                                            activePreset != ChatBackgroundPreset.DEFAULT -> "${activePreset.label} theme"
+                                            hasCustomImageBg -> "Custom wallpaper photo (shared)"
+                                            activePreset != ChatBackgroundPreset.DEFAULT -> "${activePreset.label} theme (shared)"
+                                            hasDefaultCustomImageBg -> "Settings default photo"
+                                            defaultPreset != ChatBackgroundPreset.DEFAULT -> "Settings default (${defaultPreset.label})"
                                             else -> "Default theme"
                                         },
                                         style = MaterialTheme.typography.bodySmall,
@@ -871,7 +877,7 @@ fun ChatDetailsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Only you will see this nickname in your chats with $realPeerName.",
+                        text = "Visible to both you and $realPeerName in this chat.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -951,7 +957,7 @@ fun ChatDetailsScreen(
                     }
 
                     Text(
-                        text = "Choose a theme gradient or pick your own photo.",
+                        text = "Choose a theme gradient or pick a photo (synced for both of you in this chat).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

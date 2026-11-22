@@ -17,14 +17,28 @@ import kotlin.math.roundToInt
 object MediaUtils {
     const val VIDEO_URI_PREFIX = "bsdvideo://"
     const val IMAGE_ASSET_URI_PREFIX = "bsdmedia://"
-    const val MAX_REGULAR_USER_VIDEO_BYTES = 25L * 1024L * 1024L
+    const val VIDEO_URL_FRAGMENT = "#bsdvideo.mp4"
     const val CHUNK_RAW_BYTES = 450_000
 
     private const val MAX_DIMENSION = 900
     private const val MAX_BASE64_LENGTH = 260_000
 
-    fun isVideoMediaUri(uri: String?): Boolean =
-        uri?.startsWith(VIDEO_URI_PREFIX) == true
+    fun isRemoteHttpUri(uri: String?): Boolean =
+        uri?.let { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) } == true
+
+    fun isVideoMediaUri(uri: String?): Boolean {
+        if (uri.isNullOrBlank()) return false
+        if (uri.startsWith(VIDEO_URI_PREFIX)) return true
+        val lower = uri.lowercase()
+        if (lower.contains("#bsdvideo")) return true
+        val cleanPath = lower.substringBefore('#').substringBefore('?')
+        return cleanPath.endsWith(".mp4") ||
+            cleanPath.endsWith(".mov") ||
+            cleanPath.endsWith(".webm") ||
+            cleanPath.endsWith(".mkv") ||
+            cleanPath.endsWith(".m4v") ||
+            cleanPath.endsWith(".3gp")
+    }
 
     fun isChunkedMediaUri(uri: String?): Boolean =
         uri?.startsWith(VIDEO_URI_PREFIX) == true || uri?.startsWith(IMAGE_ASSET_URI_PREFIX) == true

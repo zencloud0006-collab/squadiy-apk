@@ -1,8 +1,8 @@
 package com.bsdcampus.app.model
 
 object CampusConstants {
-    const val APP_VERSION = "Version 2.7.0 • Unofficial Student Community"
-    const val BUILD_NUMBER = "Build 4"
+    const val APP_VERSION = "Version 2.8.0 • Unofficial Student Community"
+    const val BUILD_NUMBER = "Build 5"
     const val SCHOOL_NAME = "BSD Public School"
     const val SCHOOL_FULL_TITLE = "Unofficial Student-Built Community Platform"
     const val UNOFFICIAL_SHORT_DISCLAIMER =

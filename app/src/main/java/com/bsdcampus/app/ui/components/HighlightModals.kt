@@ -135,12 +135,12 @@ fun HighlightCreatorDialog(
     }
 
     val mediaPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(10)
+        contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
         if (uris.isNotEmpty()) {
             isUploadingMedia = true
             scope.launch {
-                uris.take(25 - items.size).forEach { uri ->
+                uris.forEach { uri ->
                     val isVideo = MediaUtils.isVideoContentUri(context, uri)
                     CampusMediaRepository.uploadPickedMediaUri(
                         context = context,

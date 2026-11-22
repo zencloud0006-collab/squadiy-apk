@@ -687,8 +687,9 @@ private fun ReelPageItem(
         }
     }
 
+    val isDirectRemote = MediaUtils.isRemoteHttpUri(reel.videoUrl)
     LaunchedEffect(reel.videoUrl, isActivePage) {
-        if (!isChunked && localFile == null && !isLoadingVideo && isActivePage) {
+        if (!isChunked && !isDirectRemote && localFile == null && !isLoadingVideo && isActivePage) {
             isLoadingVideo = true
             videoError = null
             CampusMediaRepository.resolveVideoFile(context, reel.videoUrl)
@@ -700,7 +701,7 @@ private fun ReelPageItem(
 
     val hasAttachedMusic = !reel.musicPreviewUrl.isNullOrBlank()
     val effectiveVideoVolume = if (isMuted || (reel.muteOriginalAudio && hasAttachedMusic)) 0f else 1f
-    val shouldCreatePlayer = isActivePage && (isChunked || localFile != null)
+    val shouldCreatePlayer = isActivePage && (isChunked || isDirectRemote || localFile != null)
 
     val exoPlayer = remember(reel.id, reel.videoUrl, shouldCreatePlayer, localFile) {
         if (!shouldCreatePlayer) return@remember null
@@ -720,7 +721,7 @@ private fun ReelPageItem(
                             .createMediaSource(MediaItem.fromUri(reel.videoUrl))
                     )
                 } else {
-                    setMediaItem(MediaItem.fromUri(reel.videoUrl))
+                    setMediaItem(MediaItem.fromUri(reel.videoUrl.substringBefore('#')))
                 }
                 repeatMode = Player.REPEAT_MODE_ALL
                 volume = effectiveVideoVolume

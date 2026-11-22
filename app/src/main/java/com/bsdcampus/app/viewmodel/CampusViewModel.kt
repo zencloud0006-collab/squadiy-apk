@@ -375,9 +375,12 @@ class CampusViewModel(
         .catch { emit(emptyMap()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyMap())
 
-    val chatPreferences: StateFlow<Map<String, ChatPreference>> = repository.observeChatPreferences(currentUserId)
-        .catch { emit(emptyMap()) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyMap())
+    val chatPreferences: StateFlow<Map<String, ChatPreference>> = combine(
+        repository.observeChatPreferences(currentUserId).catch { emit(emptyMap()) },
+        repository.observeSharedChatThreads(currentUserId).catch { emit(emptyMap()) }
+    ) { legacy, shared ->
+        legacy + shared
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyMap())
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val reports: StateFlow<List<CampusReport>> = isCurrentUserAdmin
@@ -405,10 +408,10 @@ class CampusViewModel(
         }
         grouped.mapNotNull { (otherId, thread) ->
             val otherUser = userById[otherId] ?: return@mapNotNull null
-            val last = thread.maxByOrNull { it.createdAt ?: Timestamp(0, 0) } ?: return@mapNotNull null
+            val last = thread.maxByOrNull { it.createdAt?.toDate()?.time ?: Long.MAX_VALUE } ?: return@mapNotNull null
             val unread = thread.count { it.recipientId == currentUserId && !it.read }
             ConversationSummary(otherUser = otherUser, lastMessage = last, unreadCount = unread)
-        }.sortedByDescending { it.lastMessage.createdAt ?: Timestamp(0, 0) }
+        }.sortedByDescending { it.lastMessage.createdAt?.toDate()?.time ?: Long.MAX_VALUE }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), emptyList())
 
     val analytics: StateFlow<CampusAnalytics> = combine(

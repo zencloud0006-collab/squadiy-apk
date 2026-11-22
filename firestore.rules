@@ -92,6 +92,8 @@ service cloud.firestore {
              (!('savedReelIds' in data) || (data.savedReelIds is list && data.savedReelIds.size() <= 200 && (data.savedReelIds.size() == 0 || data.savedReelIds[0] is string))) &&
              (!('archivedPostIds' in data) || (data.archivedPostIds is list && data.archivedPostIds.size() <= 200 && (data.archivedPostIds.size() == 0 || data.archivedPostIds[0] is string))) &&
              (!('blockedUserIds' in data) || (data.blockedUserIds is list && data.blockedUserIds.size() <= 200 && (data.blockedUserIds.size() == 0 || data.blockedUserIds[0] is string))) &&
+             (!('defaultChatBackgroundPreset' in data) || data.defaultChatBackgroundPreset in ['default', 'midnight', 'aurora', 'rose', 'emerald', 'sunset', 'sky', 'lavender']) &&
+             (!('defaultChatBackgroundImage' in data) || (data.defaultChatBackgroundImage is string && data.defaultChatBackgroundImage.size() <= 350000)) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -206,6 +208,18 @@ service cloud.firestore {
              (!('nickname' in data) || (data.nickname is string && data.nickname.size() <= 40)) &&
              (!('backgroundPreset' in data) || data.backgroundPreset in ['default', 'midnight', 'aurora', 'rose', 'emerald', 'sunset', 'sky', 'lavender']) &&
              (!('backgroundImage' in data) || (data.backgroundImage is string && data.backgroundImage.size() <= 350000)) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidSharedChatThread(data) {
+      return data.threadId is string && data.threadId.size() >= 3 && data.threadId.size() <= 260 &&
+             data.participants is list && data.participants.size() == 2 &&
+             data.participants[0] is string && data.participants[1] is string &&
+             data.participants[0] != data.participants[1] &&
+             (!('nickname' in data) || (data.nickname is string && data.nickname.size() <= 40)) &&
+             (!('backgroundPreset' in data) || data.backgroundPreset in ['default', 'midnight', 'aurora', 'rose', 'emerald', 'sunset', 'sky', 'lavender']) &&
+             (!('backgroundImage' in data) || (data.backgroundImage is string && data.backgroundImage.size() <= 350000)) &&
+             data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128 &&
              isValidTimestamp(data.updatedAt);
     }
 
@@ -329,7 +343,7 @@ service cloud.firestore {
              data.title is string && data.title.size() >= 1 && data.title.size() <= 40 &&
              (!('coverAvatar' in data) || (data.coverAvatar is string && data.coverAvatar.size() <= 350000)) &&
              (!('coverEmoji' in data) || (data.coverEmoji is string && data.coverEmoji.size() <= 16)) &&
-             data.items is list && data.items.size() >= 1 && data.items.size() <= 25 &&
+             data.items is list && data.items.size() >= 1 &&
              data.items[0] is map &&
              data.items[0].mediaUrl is string && data.items[0].mediaUrl.size() >= 1 && data.items[0].mediaUrl.size() <= 350000 &&
              data.items[0].mediaType in ['image', 'video'] &&
@@ -461,6 +475,30 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(userId) && isValidId(peerId) && (request.auth.uid == userId || isAdmin());
     }
 
+    match /chat_threads/{threadId} {
+      allow get: if isSignedIn() && isValidId(threadId) && (resource == null || request.auth.uid in resource.data.participants || isAdmin());
+      allow list: if isSignedIn() && (request.auth.uid in resource.data.participants || isAdmin());
+
+      allow create: if isSignedIn() &&
+                       isValidId(threadId) &&
+                       (request.auth.uid in incoming().participants) &&
+                       incoming().updatedBy == request.auth.uid &&
+                       incoming().threadId == threadId &&
+                       incoming().keys().hasAll(['threadId', 'participants', 'updatedBy', 'updatedAt']) &&
+                       isValidSharedChatThread(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(threadId) &&
+                       (request.auth.uid in existing().participants) &&
+                       incoming().threadId == existing().threadId &&
+                       incoming().participants == existing().participants &&
+                       incoming().updatedBy == request.auth.uid &&
+                       incoming().keys().hasAll(['threadId', 'participants', 'updatedBy', 'updatedAt']) &&
+                       isValidSharedChatThread(incoming());
+
+      allow delete: if isSignedIn() && isValidId(threadId) && ((request.auth.uid in resource.data.participants) || isAdmin());
+    }
+
     match /campus_follows/{followId} {
       allow get: if isSignedIn() && isValidId(followId);
       allow list: if isSignedIn() && resource.data.isActive == true;
@@ -488,7 +526,6 @@ service cloud.firestore {
                        incoming().authorId == request.auth.uid &&
                        incoming().keys().hasAll(['authorId', 'authorName', 'authorRole', 'content', 'category', 'isOfficial', 'isPinned', 'likedBy', 'commentsCount', 'isActive', 'createdAt', 'updatedAt']) &&
                        isValidPost(incoming()) &&
-                       (isAdmin() || !('images' in incoming()) || incoming().images.size() <= 10) &&
                        (isAdmin() || (!incoming().isPinned && !incoming().isOfficial && incoming().authorRole != 'admin'));
 
       allow update: if isSignedIn() &&
@@ -507,7 +544,6 @@ service cloud.firestore {
                            incoming().isPinned == existing().isPinned &&
                            incoming().isOfficial == existing().isOfficial &&
                            incoming().authorRole == existing().authorRole &&
-                           (!('images' in incoming()) || incoming().images.size() <= 10) &&
                            incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'images', 'imageAspectRatio', 'musicTitle', 'musicArtist', 'musicArtworkUrl', 'musicPreviewUrl', 'musicStartSec', 'updatedAt'])
                          ) ||
                          (
@@ -675,8 +711,7 @@ service cloud.firestore {
                        (isAdmin() || notSuspended()) &&
                        incoming().ownerId == request.auth.uid &&
                        incoming().keys().hasAll(['ownerId', 'mimeType', 'chunkCount', 'totalBytes', 'createdAt']) &&
-                       isValidMediaAsset(incoming()) &&
-                       (isAdmin() || (incoming().chunkCount <= 75 && incoming().totalBytes <= 26214400));
+                       isValidMediaAsset(incoming());
       allow update: if false;
       allow delete: if isSignedIn() && isValidId(assetId) && (resource.data.ownerId == request.auth.uid || isAdmin());
 

@@ -58,6 +58,8 @@
         "savedReelIds": { "type": "array" },
         "archivedPostIds": { "type": "array" },
         "blockedUserIds": { "type": "array" },
+        "defaultChatBackgroundPreset": { "type": "string" },
+        "defaultChatBackgroundImage": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -227,6 +229,21 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "peerId", "updatedAt"]
+    },
+    "SharedChatThread": {
+      "title": "SharedChatThread",
+      "description": "Two-way synchronized chat nickname and background wallpaper shared by both conversation participants",
+      "type": "object",
+      "properties": {
+        "threadId": { "type": "string" },
+        "participants": { "type": "array" },
+        "nickname": { "type": "string" },
+        "backgroundPreset": { "type": "string" },
+        "backgroundImage": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["threadId", "participants", "updatedBy", "updatedAt"]
     },
     "MediaAsset": {
       "title": "MediaAsset",
@@ -423,6 +440,10 @@
     "/users/{userId}/chat_preferences/{peerId}": {
       "schema": { "$ref": "#/entities/ChatPreference" },
       "description": "Per-peer custom chat nicknames and backgrounds isolated per user"
+    },
+    "/chat_threads/{threadId}": {
+      "schema": { "$ref": "#/entities/SharedChatThread" },
+      "description": "Two-way synchronized custom nicknames and backgrounds shared by chat participants"
     },
     "/campus_follows/{followId}": {
       "schema": { "$ref": "#/entities/CampusFollow" },

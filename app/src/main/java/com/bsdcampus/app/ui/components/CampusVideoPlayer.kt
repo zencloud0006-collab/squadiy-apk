@@ -69,6 +69,7 @@ fun CampusVideoPlayer(
     autoPlay: Boolean = false,
     initialMuted: Boolean = false,
     forceMuted: Boolean? = null,
+    onToggleMute: (() -> Unit)? = null,
     startMs: Long = 0L,
     endMs: Long = 0L,
     playbackSpeed: Float = 1f,
@@ -82,6 +83,9 @@ fun CampusVideoPlayer(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val isChunked = MediaUtils.isChunkedMediaUri(videoUri)
+    val isDirectPlayable = MediaUtils.isRemoteHttpUri(videoUri) ||
+        videoUri.startsWith("content://", ignoreCase = true) ||
+        videoUri.startsWith("file://", ignoreCase = true)
     val cachedLocalFile = remember(videoUri) {
         if (isChunked) {
             MediaUtils.extractAssetId(videoUri)?.let { CampusChunkedVideoCache.cachedMp4File(context, it) }
@@ -98,7 +102,7 @@ fun CampusVideoPlayer(
     var isActuallyPlaying by remember { mutableStateOf(false) }
 
     LaunchedEffect(videoUri, shouldPlay) {
-        if (!isChunked && shouldPlay && localFile == null && !isLoading) {
+        if (!isChunked && !isDirectPlayable && shouldPlay && localFile == null && !isLoading) {
             isLoading = true
             loadError = null
             CampusMediaRepository.resolveVideoFile(context, videoUri)
@@ -108,14 +112,14 @@ fun CampusVideoPlayer(
         }
     }
 
-    val shouldCreatePlayer = shouldPlay && (isChunked || localFile != null)
+    val shouldCreatePlayer = shouldPlay && (isChunked || isDirectPlayable || localFile != null)
     val exoPlayer = remember(videoUri, shouldCreatePlayer, localFile, startMs, endMs) {
         if (!shouldCreatePlayer) return@remember null
         val fileToPlay = localFile
         val rawItemBuilder = if (fileToPlay != null) {
             MediaItem.Builder().setUri(Uri.fromFile(fileToPlay))
         } else {
-            MediaItem.Builder().setUri(videoUri)
+            MediaItem.Builder().setUri(videoUri.substringBefore('#'))
         }
         if (endMs > startMs && endMs > 0L) {
             rawItemBuilder.setClippingConfiguration(
@@ -381,9 +385,15 @@ fun CampusVideoPlayer(
                         )
                     }
                 }
-                if (forceMuted == null) {
+                if (forceMuted == null || onToggleMute != null) {
                     IconButton(
-                        onClick = { userMuted = !userMuted },
+                        onClick = {
+                            if (onToggleMute != null) {
+                                onToggleMute()
+                            } else {
+                                userMuted = !userMuted
+                            }
+                        },
                         modifier = Modifier
                             .size(32.dp)
                             .clip(CircleShape)

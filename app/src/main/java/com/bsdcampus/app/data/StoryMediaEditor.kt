@@ -590,21 +590,12 @@ object StoryMediaEditor {
         destDir.mkdirs()
         val outFile = File(destDir, "$uploadId.mp4")
         try {
-            val maxBytes = if (isAdmin) null else MediaUtils.MAX_REGULAR_USER_VIDEO_BYTES
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(outFile).use { output ->
-                    val buf = ByteArray(16_384)
-                    var total = 0L
+                    val buf = ByteArray(65_536)
                     while (true) {
                         val read = input.read(buf)
                         if (read <= 0) break
-                        total += read
-                        if (maxBytes != null && total > maxBytes) {
-                            runCatching { outFile.delete() }
-                            return@withContext Result.failure(
-                                IllegalArgumentException("Selected video exceeds the 25 MB limit for students and teachers.")
-                            )
-                        }
                         output.write(buf, 0, read)
                     }
                 }

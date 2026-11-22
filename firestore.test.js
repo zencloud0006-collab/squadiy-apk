@@ -477,15 +477,15 @@ test("Admin Blue Tick, Class Rep, and Suspend moderation: blocks suspended users
   }));
 });
 
-test("Media Assets & Post Media Limits: admins can post unlimited media; students capped at 10 items and 25MB asset manifests", async () => {
+test("Media Assets & Post Media: all users can post >10 media and large video manifests without caps", async () => {
   const adminDb = testEnv.authenticatedContext(ADMIN_UID, {
     email: "zencloud0006@gmail.com",
     email_verified: true,
   }).firestore();
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
 
-  const elevenImages = Array.from({ length: 11 }, (_, i) => `bsdmedia://asset_${i}`);
-  await assertFails(aliceDb.collection("posts").doc("too_many").set({
+  const elevenImages = Array.from({ length: 11 }, (_, i) => `https://demo.public.blob.vercel-storage.com/campus/images/img_${i}.jpg`);
+  await assertSucceeds(aliceDb.collection("posts").doc("alice_many").set({
     authorId: ALICE_UID,
     authorName: "Alice",
     authorRole: "student",
@@ -523,7 +523,7 @@ test("Media Assets & Post Media Limits: admins can post unlimited media; student
     updatedAt: nowTs(),
   }));
 
-  // Student can upload a video asset up to 25MB (26,214,400 bytes / 59..75 chunks), blocked over 25MB or >75 chunks
+  // Legacy media_assets manifests succeed for both regular users and admins without 25MB limit
   await assertSucceeds(aliceDb.collection("media_assets").doc("vid_alice_1").set({
     ownerId: ALICE_UID,
     mimeType: "video/mp4",
@@ -531,21 +531,7 @@ test("Media Assets & Post Media Limits: admins can post unlimited media; student
     totalBytes: 1500000,
     createdAt: nowTs(),
   }));
-  await assertSucceeds(aliceDb.collection("media_assets").doc("vid_alice_25mb").set({
-    ownerId: ALICE_UID,
-    mimeType: "video/mp4",
-    chunkCount: 59,
-    totalBytes: 26214400,
-    createdAt: nowTs(),
-  }));
-  await assertFails(aliceDb.collection("media_assets").doc("vid_alice_too_many_chunks").set({
-    ownerId: ALICE_UID,
-    mimeType: "video/mp4",
-    chunkCount: 76,
-    totalBytes: 26214400,
-    createdAt: nowTs(),
-  }));
-  await assertFails(aliceDb.collection("media_assets").doc("vid_alice_huge").set({
+  await assertSucceeds(aliceDb.collection("media_assets").doc("vid_alice_huge").set({
     ownerId: ALICE_UID,
     mimeType: "video/mp4",
     chunkCount: 120,
@@ -1271,6 +1257,55 @@ test("Chat Preferences & Chat Reports: owner isolates nickname/background and ch
     reason: "Spam",
     reportedMessages: ["1", "2", "3", "4", "5", "6"],
     status: "pending",
+    createdAt: nowTs(),
+    updatedAt: nowTs(),
+  }));
+});
+
+test("Shared Chat Threads & Settings Default Background: two-way synced nickname/wallpaper & outsider isolation", async () => {
+  const eveUid = "eve_outsider_3";
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const eveDb = testEnv.authenticatedContext(eveUid).firestore();
+
+  const threadId = [ALICE_UID, BOB_UID].sort().join("_");
+
+  // Alice sets shared chat background and nickname
+  await assertSucceeds(aliceDb.collection("chat_threads").doc(threadId).set({
+    threadId,
+    participants: [ALICE_UID, BOB_UID].sort(),
+    nickname: "Lab Partner",
+    backgroundPreset: "sunset",
+    updatedBy: ALICE_UID,
+    updatedAt: nowTs(),
+  }));
+
+  // Bob can read and update the same shared thread
+  await assertSucceeds(bobDb.collection("chat_threads").doc(threadId).get());
+  await assertSucceeds(bobDb.collection("chat_threads").doc(threadId).update({
+    threadId,
+    participants: [ALICE_UID, BOB_UID].sort(),
+    nickname: "Lab Partner Pro",
+    backgroundPreset: "default",
+    backgroundImage: "https://demo.public.blob.vercel-storage.com/campus/images/bg_1.jpg",
+    updatedBy: BOB_UID,
+    updatedAt: nowTs(),
+  }));
+
+  // Unrelated Eve cannot read or tamper
+  await assertFails(eveDb.collection("chat_threads").doc(threadId).get());
+  await assertFails(eveDb.collection("chat_threads").doc(threadId).update({
+    nickname: "Intruder",
+    updatedBy: eveUid,
+    updatedAt: nowTs(),
+  }));
+
+  // UserPrivateInfo accepts defaultChatBackgroundPreset & defaultChatBackgroundImage
+  await assertSucceeds(aliceDb.collection("users").doc(ALICE_UID).collection("private").doc("settings").set({
+    userId: ALICE_UID,
+    email: "alice@bsd.edu",
+    defaultChatBackgroundPreset: "aurora",
+    defaultChatBackgroundImage: "https://demo.public.blob.vercel-storage.com/campus/images/default_bg.jpg",
     createdAt: nowTs(),
     updatedAt: nowTs(),
   }));

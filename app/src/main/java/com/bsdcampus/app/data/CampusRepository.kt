@@ -22,6 +22,7 @@ import com.bsdcampus.app.model.HighlightMediaItem
 import com.bsdcampus.app.model.NoteBubbleColor
 import com.bsdcampus.app.model.PostImageRatio
 import com.bsdcampus.app.model.ReelComment
+import com.bsdcampus.app.model.SharedChatThread
 import com.bsdcampus.app.model.StoryHighlight
 import com.bsdcampus.app.model.UserPrivateInfo
 import com.google.firebase.Firebase
@@ -363,7 +364,10 @@ class CampusRepository(
                     snapshot.toObjects(
                         DirectMessage::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                    ).sortedBy { it.createdAt ?: Timestamp(0, 0) }
+                    ).sortedWith(
+                        compareBy<DirectMessage> { it.createdAt?.toDate()?.time ?: Long.MAX_VALUE }
+                            .thenBy { it.id }
+                    )
                 }
                 .catch { error ->
                     logStreamError(error, OperationType.LIST, path)
@@ -409,6 +413,29 @@ class CampusRepository(
                         ChatPreference::class.java,
                         DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
                     ).associateBy { pref -> pref.peerId.ifBlank { pref.id } }
+                }
+                .catch { error ->
+                    logStreamError(error, OperationType.LIST, path)
+                    emit(emptyMap())
+                }
+        )
+    }
+
+    fun observeSharedChatThreads(uid: String): Flow<Map<String, ChatPreference>> = flow {
+        requireUserId()
+        val path = "chat_threads"
+        emitAll(
+            db.collection(path)
+                .whereArrayContains("participants", uid)
+                .snapshots()
+                .map { snapshot ->
+                    snapshot.toObjects(
+                        SharedChatThread::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    ).mapNotNull { thread ->
+                        val peerId = thread.peerIdFor(uid)
+                        if (peerId.isBlank()) null else peerId to thread.toChatPreference(uid)
+                    }.toMap()
                 }
                 .catch { error ->
                     logStreamError(error, OperationType.LIST, path)
@@ -862,7 +889,7 @@ class CampusRepository(
             authorClassRepresentativeGrade = author.classRepresentativeGrade,
             content = content.trim(),
             category = category,
-            images = if (isAdmin) images else images.take(10),
+            images = images,
             imageAspectRatio = PostImageRatio.fromKey(imageAspectRatio).key,
             musicTitle = if (cleanPreviewUrl != null) musicTrack?.title?.trim()?.takeIf { it.isNotBlank() }?.take(120) else null,
             musicArtist = if (cleanPreviewUrl != null) musicTrack?.artist?.trim()?.takeIf { it.isNotBlank() }?.take(120) else null,
@@ -1212,7 +1239,7 @@ class CampusRepository(
             title = trimmedTitle,
             coverAvatar = coverAvatar?.takeIf { it.isNotBlank() && it.length <= 350_000 },
             coverEmoji = coverEmoji?.takeIf { it.isNotBlank() }?.take(16),
-            items = items.take(25),
+            items = items,
             isActive = true
         )
         return try {
@@ -1244,7 +1271,7 @@ class CampusRepository(
         val docRef = db.collection("story_highlights").document(highlightId)
         val updates = mutableMapOf<String, Any>(
             "title" to trimmedTitle,
-            "items" to items.take(25).map { it.toMap() },
+            "items" to items.map { it.toMap() },
             "updatedAt" to FieldValue.serverTimestamp()
         )
         updates["coverAvatar"] = coverAvatar?.takeIf { it.isNotBlank() && it.length <= 350_000 } ?: FieldValue.delete()
@@ -1903,7 +1930,9 @@ class CampusRepository(
         if (peerId.isBlank()) {
             return Result.failure(IllegalArgumentException("Invalid chat user."))
         }
-        val docRef = db.collection("users").document(uid)
+        val threadId = SharedChatThread.threadIdFor(uid, peerId)
+        val docRef = db.collection("chat_threads").document(threadId)
+        val legacyDocRef = db.collection("users").document(uid)
             .collection("chat_preferences").document(peerId)
         val cleanNick = nickname?.trim()?.takeIf { it.isNotBlank() }?.take(40)
         val cleanPreset = ChatBackgroundPreset.fromKey(backgroundPreset).key
@@ -1912,21 +1941,20 @@ class CampusRepository(
         return try {
             val previousImage = runCatching {
                 docRef.get().await().getString("backgroundImage")
+                    ?: legacyDocRef.get().await().getString("backgroundImage")
             }.getOrNull()
 
-            if (cleanNick == null && cleanPreset == ChatBackgroundPreset.DEFAULT.key && cleanImage == null) {
-                docRef.delete().await()
-            } else {
-                val pref = ChatPreference(
-                    id = peerId,
-                    userId = uid,
-                    peerId = peerId,
-                    nickname = cleanNick,
-                    backgroundPreset = cleanPreset,
-                    backgroundImage = cleanImage
-                )
-                docRef.set(pref.toWriteMap()).await()
-            }
+            val sharedThread = SharedChatThread(
+                id = threadId,
+                threadId = threadId,
+                participants = listOf(uid, peerId).sorted(),
+                nickname = cleanNick,
+                backgroundPreset = cleanPreset,
+                backgroundImage = cleanImage,
+                updatedBy = uid
+            )
+            docRef.set(sharedThread.toWriteMap()).await()
+            runCatching { legacyDocRef.delete().await() }
 
             if (!previousImage.isNullOrBlank() && previousImage != cleanImage) {
                 if (previousImage.startsWith("bsdmedia://")) {

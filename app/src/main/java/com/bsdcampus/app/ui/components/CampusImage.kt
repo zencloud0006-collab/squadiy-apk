@@ -40,6 +40,7 @@ fun CampusImage(
 ) {
     val context = LocalContext.current
     val isChunked = MediaUtils.isChunkedMediaUri(urlOrDataUri)
+    val isRemoteHttp = MediaUtils.isRemoteHttpUri(urlOrDataUri)
     val isVideo = MediaUtils.isVideoMediaUri(urlOrDataUri)
 
     val dataBitmap = remember(urlOrDataUri) {
@@ -54,16 +55,29 @@ fun CampusImage(
     }
 
     val chunkedBitmap by produceState<ImageBitmap?>(initialValue = null, key1 = urlOrDataUri) {
-        value = if (isChunked && !urlOrDataUri.isNullOrBlank()) {
-            val bytes = CampusMediaRepository.resolveMediaImageBytes(context, urlOrDataUri)
-            if (bytes != null && bytes.isNotEmpty()) {
-                try {
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                } catch (_: Exception) {
-                    null
-                }
-            } else null
-        } else null
+        value = when {
+            isChunked && !urlOrDataUri.isNullOrBlank() -> {
+                val bytes = CampusMediaRepository.resolveMediaImageBytes(context, urlOrDataUri)
+                if (bytes != null && bytes.isNotEmpty()) {
+                    try {
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    } catch (_: Exception) {
+                        null
+                    }
+                } else null
+            }
+            isRemoteHttp && isVideo && !urlOrDataUri.isNullOrBlank() -> {
+                val bytes = CampusMediaRepository.resolveRemoteVideoThumbnailBytes(context, urlOrDataUri)
+                if (bytes != null && bytes.isNotEmpty()) {
+                    try {
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    } catch (_: Exception) {
+                        null
+                    }
+                } else null
+            }
+            else -> null
+        }
     }
 
     val resolvedBitmap = dataBitmap ?: chunkedBitmap
@@ -96,7 +110,7 @@ fun CampusImage(
                 }
             }
         }
-        isChunked -> {
+        isChunked || (isRemoteHttp && isVideo) -> {
             Box(
                 modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center

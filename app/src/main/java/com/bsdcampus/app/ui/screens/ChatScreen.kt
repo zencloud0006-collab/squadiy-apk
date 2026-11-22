@@ -9,8 +9,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
@@ -166,6 +166,8 @@ fun ChatScreen(
     notes: List<CampusNote> = emptyList(),
     typingMap: Map<String, Boolean>,
     chatPreferences: Map<String, ChatPreference> = emptyMap(),
+    defaultBackgroundPreset: String = ChatBackgroundPreset.DEFAULT.key,
+    defaultBackgroundImage: String? = null,
     blockedUserIds: Set<String> = emptySet(),
     activeChatUserId: String?,
     onSelectChatUser: (String) -> Unit,
@@ -240,6 +242,8 @@ fun ChatScreen(
                             },
                             isPeerTyping = typingMap[activePeer.uid] == true,
                             chatPreference = chatPreferences[activePeer.uid],
+                            defaultBackgroundPreset = defaultBackgroundPreset,
+                            defaultBackgroundImage = defaultBackgroundImage,
                             isBlocked = blockedUserIds.contains(activePeer.uid),
                             showBackButton = false,
                             onBack = onClearChatUser,
@@ -294,6 +298,8 @@ fun ChatScreen(
                     },
                     isPeerTyping = typingMap[activePeer.uid] == true,
                     chatPreference = chatPreferences[activePeer.uid],
+                    defaultBackgroundPreset = defaultBackgroundPreset,
+                    defaultBackgroundImage = defaultBackgroundImage,
                     isBlocked = blockedUserIds.contains(activePeer.uid),
                     showBackButton = true,
                     onBack = onClearChatUser,
@@ -759,7 +765,14 @@ private fun ConversationListPane(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .animateItem()
+                            .animateItem(
+                                fadeInSpec = null,
+                                fadeOutSpec = null,
+                                placementSpec = spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
+                            )
                             .background(
                                 if (isSelected) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                                 else Color.Transparent
@@ -880,6 +893,8 @@ private fun ChatThreadPane(
     threadMessages: List<DirectMessage>,
     isPeerTyping: Boolean,
     chatPreference: ChatPreference?,
+    defaultBackgroundPreset: String = ChatBackgroundPreset.DEFAULT.key,
+    defaultBackgroundImage: String? = null,
     isBlocked: Boolean,
     showBackButton: Boolean,
     onBack: () -> Unit,
@@ -914,6 +929,8 @@ private fun ChatThreadPane(
             peer = peer,
             threadMessages = threadMessages,
             chatPreference = chatPreference,
+            defaultBackgroundPreset = defaultBackgroundPreset,
+            defaultBackgroundImage = defaultBackgroundImage,
             isBlocked = isBlocked,
             onBack = { showChatDetails = false },
             onOpenPeerProfile = onOpenPeerProfile,
@@ -926,10 +943,9 @@ private fun ChatThreadPane(
         return
     }
 
-    var draft by remember { mutableStateOf("") }
-    var attachedMedia by remember { mutableStateOf<String?>(null) }
-    var isUploadingMedia by remember { mutableStateOf(false) }
-    var replyingToMessage by remember { mutableStateOf<DirectMessage?>(null) }
+    var attachedMedia by remember(peer.uid) { mutableStateOf<String?>(null) }
+    var isUploadingMedia by remember(peer.uid) { mutableStateOf(false) }
+    var replyingToMessage by remember(peer.uid) { mutableStateOf<DirectMessage?>(null) }
     var activeMessageActionTarget by remember { mutableStateOf<DirectMessage?>(null) }
     var editingMessage by remember { mutableStateOf<DirectMessage?>(null) }
     var editDraft by remember { mutableStateOf("") }
@@ -1003,11 +1019,18 @@ private fun ChatThreadPane(
         }
     }
 
-    LaunchedEffect(threadMessages.size, isPeerTyping, peer.uid) {
+    var didInitialScroll by remember(peer.uid) { mutableStateOf(false) }
+
+    LaunchedEffect(peer.uid, threadMessages.size, isPeerTyping) {
         onMarkRead()
         val total = threadMessages.size + if (isPeerTyping) 1 else 0
         if (total > 0) {
-            listState.animateScrollToItem(total - 1, scrollOffset = 10_000)
+            if (!didInitialScroll) {
+                didInitialScroll = true
+                listState.scrollToItem(total - 1, scrollOffset = 100_000)
+            } else {
+                listState.animateScrollToItem(total - 1, scrollOffset = 100_000)
+            }
         }
     }
 
@@ -1023,16 +1046,6 @@ private fun ChatThreadPane(
         }
         if (total > 0 && (keyboardOpening || viewportShrank || focusedWithKeyboard)) {
             listState.scrollToItem(total - 1, scrollOffset = 100_000)
-        }
-    }
-
-    LaunchedEffect(draft) {
-        if (draft.isNotBlank()) {
-            onSetTyping(true)
-            delay(2500L)
-            onSetTyping(false)
-        } else {
-            onSetTyping(false)
         }
     }
 
@@ -1242,8 +1255,21 @@ private fun ChatThreadPane(
         }
         HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
 
-        val activePreset = ChatBackgroundPreset.fromKey(chatPreference?.backgroundPreset)
-        val customBgImage = chatPreference?.backgroundImage?.takeIf { it.isNotBlank() }
+        val threadPreset = ChatBackgroundPreset.fromKey(chatPreference?.backgroundPreset)
+        val threadCustomBgImage = chatPreference?.backgroundImage?.takeIf { it.isNotBlank() }
+        val hasThreadOverride = threadCustomBgImage != null || threadPreset != ChatBackgroundPreset.DEFAULT
+        val activePreset = if (hasThreadOverride) threadPreset else ChatBackgroundPreset.fromKey(defaultBackgroundPreset)
+        val customBgImage = if (hasThreadOverride) threadCustomBgImage else defaultBackgroundImage?.takeIf { it.isNotBlank() }
+        val wallpaperBrush = remember(activePreset) {
+            if (activePreset != ChatBackgroundPreset.DEFAULT && activePreset.colorsArgb.isNotEmpty()) {
+                Brush.verticalGradient(activePreset.colorsArgb.map { Color(it) })
+            } else {
+                null
+            }
+        }
+        val myBubbleBrush = remember {
+            Brush.horizontalGradient(listOf(InstaBlue, InstaIndigo))
+        }
         val isDarkWallpaper = customBgImage != null || activePreset.isDarkPreset
         val isLightWallpaper = customBgImage == null && !activePreset.isDarkPreset && activePreset != ChatBackgroundPreset.DEFAULT
         val subtleWallpaperTextColor = when {
@@ -1270,11 +1296,11 @@ private fun ChatThreadPane(
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = 0.30f))
                 )
-            } else if (activePreset != ChatBackgroundPreset.DEFAULT) {
+            } else if (wallpaperBrush != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Brush.verticalGradient(activePreset.colorsArgb.map { Color(it) }))
+                        .background(wallpaperBrush)
                 )
             }
 
@@ -1395,7 +1421,14 @@ private fun ChatThreadPane(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = if (index == 0) 0.dp else if (isStackedWithPrev && !showDayDivider) 2.dp else 10.dp)
-                        .animateItem()
+                        .animateItem(
+                            fadeInSpec = null,
+                            fadeOutSpec = null,
+                            placementSpec = spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            )
+                        )
                 ) {
                     if (showDayDivider && msg.createdAt != null) {
                         Box(
@@ -1691,7 +1724,7 @@ private fun ChatThreadPane(
 
                             val bubbleBgModifier = if (isMine) {
                                 Modifier.background(
-                                    brush = Brush.horizontalGradient(listOf(InstaBlue, InstaIndigo)),
+                                    brush = myBubbleBrush,
                                     shape = bubbleShape
                                 )
                             } else {
@@ -1704,7 +1737,6 @@ private fun ChatThreadPane(
                             Box(
                                 modifier = Modifier
                                     .widthIn(max = 285.dp)
-                                    .animateContentSize()
                                     .clip(bubbleShape)
                                     .then(bubbleBgModifier)
                                     .pointerInput(msg.id) {
@@ -2051,166 +2083,53 @@ private fun ChatThreadPane(
                 }
             }
         } else {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(26.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            mediaPicker.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
-                            )
-                        },
-                        enabled = !isUploadingMedia && !isRecording,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        if (isUploadingMedia) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(
-                                Icons.Outlined.AddPhotoAlternate,
-                                contentDescription = "Attach Photo or Video",
-                                tint = InstaBlue
-                            )
-                        }
-                    }
-
-                    val recTransition = rememberInfiniteTransition(label = "micPulse")
-                    val micPulseScale by recTransition.animateFloat(
-                        initialValue = 1f,
-                        targetValue = if (isRecording) 1.18f else 1f,
-                        animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
-                        label = "micScale"
+            ChatComposerBar(
+                peerId = peer.uid,
+                isRecording = isRecording,
+                recordingSeconds = recordingSeconds,
+                isUploadingMedia = isUploadingMedia,
+                hasAttachedMedia = attachedMedia != null,
+                onPickMedia = {
+                    mediaPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                     )
-                    IconButton(
-                        onClick = {
-                            if (isRecording) {
-                                stopAndSendVoiceRecording()
-                            } else {
-                                val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
-                                if (hasPerm) startVoiceRecording() else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                        },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .scale(if (isRecording) micPulseScale else 1f)
-                            .clip(CircleShape)
-                            .background(if (isRecording) InstaLikeRed.copy(alpha = 0.16f) else Color.Transparent)
-                    ) {
-                        Icon(
-                            imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
-                            contentDescription = if (isRecording) "Stop and send voice note" else "Record voice note",
-                            tint = if (isRecording) InstaLikeRed else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                },
+                onToggleRecord = {
+                    if (isRecording) {
+                        stopAndSendVoiceRecording()
+                    } else {
+                        val hasPerm = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                        if (hasPerm) startVoiceRecording() else audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 6.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (isRecording) {
-                            Text(
-                                text = "Recording voice note (${recordingSeconds}s)...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = InstaLikeRed,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        } else {
-                            if (draft.isEmpty()) {
-                                Text(
-                                    text = "Message...",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            BasicTextField(
-                                value = draft,
-                                onValueChange = { draft = it },
-                                maxLines = 4,
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
-                                cursorBrush = SolidColor(InstaBlue),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onFocusChanged { focusState ->
-                                        isComposerFocused = focusState.isFocused
-                                    }
-                                    .testTag("chat_message_input")
-                            )
-                        }
-                    }
-
-                    val canSend = !isRecording && !isUploadingMedia && (draft.isNotBlank() || attachedMedia != null)
-                    if (canSend) {
-                        IconButton(
-                            onClick = {
-                                val replyTarget = replyingToMessage
-                                onSendMessage(
-                                    draft.trim(),
-                                    attachedMedia,
-                                    null,
-                                    null,
-                                    replyTarget,
-                                    replyTarget?.let { senderDisplayNameFor(it.senderId) }
-                                )
-                                draft = ""
-                                attachedMedia = null
-                                replyingToMessage = null
-                                onSetTyping(false)
-                            },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(InstaBlue)
-                                .testTag("chat_send_button")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Outlined.Send,
-                                contentDescription = "Send message",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    } else if (!isRecording && !isUploadingMedia) {
-                        IconButton(
-                            onClick = {
-                                val replyTarget = replyingToMessage
-                                onSendMessage(
-                                    "❤️",
-                                    null,
-                                    null,
-                                    null,
-                                    replyTarget,
-                                    replyTarget?.let { senderDisplayNameFor(it.senderId) }
-                                )
-                                replyingToMessage = null
-                            },
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .testTag("chat_quick_heart_button")
-                        ) {
-                            Icon(
-                                Icons.Filled.Favorite,
-                                contentDescription = "Send heart",
-                                tint = InstaLikeRed,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                },
+                onFocusChanged = { isComposerFocused = it },
+                onSetTyping = onSetTyping,
+                onSendText = { trimmedText ->
+                    val replyTarget = replyingToMessage
+                    onSendMessage(
+                        trimmedText,
+                        attachedMedia,
+                        null,
+                        null,
+                        replyTarget,
+                        replyTarget?.let { senderDisplayNameFor(it.senderId) }
+                    )
+                    attachedMedia = null
+                    replyingToMessage = null
+                },
+                onSendHeart = {
+                    val replyTarget = replyingToMessage
+                    onSendMessage(
+                        "❤️",
+                        null,
+                        null,
+                        null,
+                        replyTarget,
+                        replyTarget?.let { senderDisplayNameFor(it.senderId) }
+                    )
+                    replyingToMessage = null
                 }
-            }
+            )
         }
     }
 
@@ -2352,6 +2271,163 @@ private fun ChatThreadPane(
             onDownload = { downloadChatImage(it) },
             onDismiss = { zoomedImageUrl = null }
         )
+    }
+}
+
+@Composable
+private fun ChatComposerBar(
+    peerId: String,
+    isRecording: Boolean,
+    recordingSeconds: Long,
+    isUploadingMedia: Boolean,
+    hasAttachedMedia: Boolean,
+    onPickMedia: () -> Unit,
+    onToggleRecord: () -> Unit,
+    onFocusChanged: (Boolean) -> Unit,
+    onSetTyping: (Boolean) -> Unit,
+    onSendText: (String) -> Unit,
+    onSendHeart: () -> Unit
+) {
+    var draft by remember(peerId) { mutableStateOf("") }
+
+    LaunchedEffect(peerId, draft) {
+        if (draft.isNotBlank()) {
+            onSetTyping(true)
+            delay(2500L)
+            onSetTyping(false)
+        } else {
+            onSetTyping(false)
+        }
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(26.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onPickMedia,
+                enabled = !isUploadingMedia && !isRecording,
+                modifier = Modifier.size(40.dp)
+            ) {
+                if (isUploadingMedia) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        Icons.Outlined.AddPhotoAlternate,
+                        contentDescription = "Attach Photo or Video",
+                        tint = InstaBlue
+                    )
+                }
+            }
+
+            val recTransition = rememberInfiniteTransition(label = "micPulse")
+            val micPulseScale by recTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = if (isRecording) 1.18f else 1f,
+                animationSpec = infiniteRepeatable(tween(550), RepeatMode.Reverse),
+                label = "micScale"
+            )
+            IconButton(
+                onClick = onToggleRecord,
+                modifier = Modifier
+                    .size(40.dp)
+                    .scale(if (isRecording) micPulseScale else 1f)
+                    .clip(CircleShape)
+                    .background(if (isRecording) InstaLikeRed.copy(alpha = 0.16f) else Color.Transparent)
+            ) {
+                Icon(
+                    imageVector = if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                    contentDescription = if (isRecording) "Stop and send voice note" else "Record voice note",
+                    tint = if (isRecording) InstaLikeRed else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (isRecording) {
+                    Text(
+                        text = "Recording voice note (${recordingSeconds}s)...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = InstaLikeRed,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                } else {
+                    if (draft.isEmpty()) {
+                        Text(
+                            text = "Message...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    BasicTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        maxLines = 4,
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                        cursorBrush = SolidColor(InstaBlue),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { focusState ->
+                                onFocusChanged(focusState.isFocused)
+                            }
+                            .testTag("chat_message_input")
+                    )
+                }
+            }
+
+            val canSend = !isRecording && !isUploadingMedia && (draft.isNotBlank() || hasAttachedMedia)
+            if (canSend) {
+                IconButton(
+                    onClick = {
+                        val trimmed = draft.trim()
+                        draft = ""
+                        onSetTyping(false)
+                        onSendText(trimmed)
+                    },
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(InstaBlue)
+                        .testTag("chat_send_button")
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.Send,
+                        contentDescription = "Send message",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            } else if (!isRecording && !isUploadingMedia) {
+                IconButton(
+                    onClick = onSendHeart,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .testTag("chat_quick_heart_button")
+                ) {
+                    Icon(
+                        Icons.Filled.Favorite,
+                        contentDescription = "Send heart",
+                        tint = InstaLikeRed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

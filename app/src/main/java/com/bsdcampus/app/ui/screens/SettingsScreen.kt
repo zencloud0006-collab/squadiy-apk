@@ -6,16 +6,22 @@ import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,11 +30,14 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CleaningServices
@@ -36,17 +45,20 @@ import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Logout
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.ViewAgenda
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,6 +68,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -71,28 +84,37 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bsdcampus.app.BuildConfig
 import com.bsdcampus.app.data.AppThemeMode
 import com.bsdcampus.app.data.CacheManager
 import com.bsdcampus.app.data.CacheStats
+import com.bsdcampus.app.data.CampusMediaRepository
 import com.bsdcampus.app.data.PreferencesRepository
 import com.bsdcampus.app.model.AppUpdateConfig
 import com.bsdcampus.app.model.CampusConstants
 import com.bsdcampus.app.model.CampusPost
 import com.bsdcampus.app.model.CampusTab
 import com.bsdcampus.app.model.CampusUser
+import com.bsdcampus.app.model.ChatBackgroundPreset
 import com.bsdcampus.app.model.FeedLayoutMode
 import com.bsdcampus.app.model.UserPrivateInfo
 import com.bsdcampus.app.notifications.CampusNotificationWorker
 import com.bsdcampus.app.notifications.NotificationHelper
 import com.bsdcampus.app.ui.auth.AuthHelper
+import com.bsdcampus.app.ui.components.CampusImage
 import com.bsdcampus.app.ui.theme.Emerald500
 import com.bsdcampus.app.ui.theme.InstaBlue
 import com.bsdcampus.app.ui.theme.Rose500
@@ -100,6 +122,7 @@ import com.bsdcampus.app.ui.theme.Zinc700
 import com.bsdcampus.app.ui.theme.Zinc900
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     currentUser: CampusUser,
@@ -143,8 +166,42 @@ fun SettingsScreen(
         ).show()
     }
 
-    var activeModal by remember { mutableStateOf<String?>(null) } // personal, saved, activity, layout, language, honor, help, status, logout
+    var activeModal by remember { mutableStateOf<String?>(null) } // personal, saved, activity, layout, language, chat_bg, honor, help, status, logout
+    var isUploadingChatBg by remember { mutableStateOf(false) }
     val effectiveInfo = privateInfo ?: UserPrivateInfo(userId = currentUser.uid, email = googleEmail)
+    val defaultChatPreset = ChatBackgroundPreset.fromKey(effectiveInfo.defaultChatBackgroundPreset)
+    val hasCustomDefaultBg = !effectiveInfo.defaultChatBackgroundImage.isNullOrBlank()
+
+    val defaultChatBgPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri != null) {
+            isUploadingChatBg = true
+            scope.launch {
+                CampusMediaRepository.uploadPickedMediaUri(
+                    context = context,
+                    uri = uri,
+                    isAdmin = isAdmin
+                ).onSuccess { uploadedRef ->
+                    onUpdatePrivateSettings {
+                        it.copy(
+                            defaultChatBackgroundPreset = ChatBackgroundPreset.DEFAULT.key,
+                            defaultChatBackgroundImage = uploadedRef
+                        )
+                    }
+                    activeModal = null
+                    Toast.makeText(context, "Default chat background updated", Toast.LENGTH_SHORT).show()
+                }.onFailure { err ->
+                    Toast.makeText(
+                        context,
+                        err.localizedMessage ?: "Unable to upload chat background",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                isUploadingChatBg = false
+            }
+        }
+    }
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -193,7 +250,7 @@ fun SettingsScreen(
                 }
             }
 
-            if (match("appearance dark mode light system layout feed theme language media")) {
+            if (match("appearance dark mode light system layout feed theme language media chat background wallpaper")) {
                 SettingsGroupCard(title = "Display & App Preferences") {
                     Column(
                         modifier = Modifier
@@ -235,6 +292,17 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    HorizontalDivider()
+                    SettingsNavRow(
+                        icon = Icons.Outlined.Wallpaper,
+                        title = "Default Chat Background",
+                        subtitle = when {
+                            hasCustomDefaultBg -> "Custom wallpaper photo (all chats)"
+                            defaultChatPreset != ChatBackgroundPreset.DEFAULT -> "${defaultChatPreset.label} theme (all chats)"
+                            else -> "Default theme (applies to all chats)"
+                        },
+                        tag = "settings_default_chat_bg_row"
+                    ) { activeModal = "chat_bg" }
                     HorizontalDivider()
                     SettingsNavRow(
                         icon = Icons.Outlined.ViewAgenda,
@@ -727,6 +795,188 @@ fun SettingsScreen(
             confirmButton = { TextButton(onClick = { activeModal = null }) { Text("Done") } }
         )
 
+        "chat_bg" -> Dialog(onDismissRequest = { if (!isUploadingChatBg) activeModal = null }) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.outline)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "All Chats Background",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Black
+                        )
+                        IconButton(
+                            onClick = { if (!isUploadingChatBg) activeModal = null }
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close")
+                        }
+                    }
+
+                    Text(
+                        text = "Applies as the default wallpaper across all chats unless a specific chat sets its own background.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    if (hasCustomDefaultBg) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CampusImage(
+                                urlOrDataUri = effectiveInfo.defaultChatBackgroundImage.orEmpty(),
+                                contentDescription = "Active default chat photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .border(1.5.dp, InstaBlue, RoundedCornerShape(10.dp))
+                            )
+                            Text(
+                                text = "Custom photo active for all chats",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = InstaBlue
+                            )
+                        }
+                    }
+
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        ChatBackgroundPreset.entries.forEach { preset ->
+                            val isSelected = !hasCustomDefaultBg && defaultChatPreset == preset
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .width(66.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable(enabled = !isUploadingChatBg) {
+                                        onUpdatePrivateSettings {
+                                            it.copy(
+                                                defaultChatBackgroundPreset = preset.key,
+                                                defaultChatBackgroundImage = null
+                                            )
+                                        }
+                                        activeModal = null
+                                    }
+                                    .padding(vertical = 4.dp)
+                                    .testTag("settings_chat_bg_preset_${preset.key}")
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .then(
+                                            if (preset == ChatBackgroundPreset.DEFAULT) {
+                                                Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                                            } else {
+                                                Modifier.background(
+                                                    Brush.verticalGradient(preset.colorsArgb.map { Color(it) })
+                                                )
+                                            }
+                                        )
+                                        .border(
+                                            width = if (isSelected) 2.5.dp else 1.dp,
+                                            color = if (isSelected) InstaBlue else MaterialTheme.colorScheme.outline,
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Check,
+                                            contentDescription = "Selected",
+                                            tint = if (preset.isDarkPreset) Color.White else InstaBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = preset.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline)
+
+                    Button(
+                        onClick = {
+                            defaultChatBgPicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        enabled = !isUploadingChatBg,
+                        colors = ButtonDefaults.buttonColors(containerColor = InstaBlue, contentColor = Color.White),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("settings_chat_bg_pick_photo")
+                    ) {
+                        if (isUploadingChatBg) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Uploading Photo...")
+                        } else {
+                            Icon(Icons.Outlined.Image, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Choose Photo From Gallery")
+                        }
+                    }
+
+                    if (hasCustomDefaultBg || defaultChatPreset != ChatBackgroundPreset.DEFAULT) {
+                        OutlinedButton(
+                            onClick = {
+                                onUpdatePrivateSettings {
+                                    it.copy(
+                                        defaultChatBackgroundPreset = ChatBackgroundPreset.DEFAULT.key,
+                                        defaultChatBackgroundImage = null
+                                    )
+                                }
+                                activeModal = null
+                            },
+                            enabled = !isUploadingChatBg,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("settings_chat_bg_reset")
+                        ) {
+                            Icon(Icons.Outlined.Restore, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Reset to Default Background")
+                        }
+                    }
+                }
+            }
+        }
+
         "honor" -> AlertDialog(
             onDismissRequest = { activeModal = null },
             title = { Text("Student Community Honor Code") },
@@ -804,11 +1054,13 @@ private fun SettingsNavRow(
     icon: ImageVector,
     title: String,
     subtitle: String,
+    tag: String? = null,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically

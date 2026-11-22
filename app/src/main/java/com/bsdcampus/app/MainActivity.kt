@@ -83,6 +83,7 @@ import com.bsdcampus.app.data.CampusRepository
 import com.bsdcampus.app.data.PreferencesRepository
 import com.bsdcampus.app.firebase.configureAppCheck
 import com.bsdcampus.app.model.CampusPost
+import com.bsdcampus.app.model.ChatBackgroundPreset
 import com.bsdcampus.app.model.CampusReel
 import com.bsdcampus.app.model.CampusTab
 import com.bsdcampus.app.model.UiState
@@ -654,6 +655,8 @@ private fun AuthenticatedCampusHost(
                                             notes = visibleNotes,
                                             typingMap = typingMap,
                                             chatPreferences = chatPreferences,
+                                            defaultBackgroundPreset = privateInfo?.defaultChatBackgroundPreset ?: ChatBackgroundPreset.DEFAULT.key,
+                                            defaultBackgroundImage = privateInfo?.defaultChatBackgroundImage,
                                             blockedUserIds = privateInfo?.blockedUserIds.orEmpty().toSet(),
                                             activeChatUserId = activeChatUserId,
                                             onSelectChatUser = { viewModel.openDirectChat(it) },

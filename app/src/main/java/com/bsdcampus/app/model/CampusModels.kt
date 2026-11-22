@@ -128,6 +128,8 @@ data class UserPrivateInfo(
     val savedReelIds: List<String> = emptyList(),
     val archivedPostIds: List<String> = emptyList(),
     val blockedUserIds: List<String> = emptyList(),
+    val defaultChatBackgroundPreset: String = ChatBackgroundPreset.DEFAULT.key,
+    val defaultChatBackgroundImage: String? = null,
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -148,6 +150,8 @@ data class UserPrivateInfo(
             "savedReelIds" to savedReelIds,
             "archivedPostIds" to archivedPostIds,
             "blockedUserIds" to blockedUserIds,
+            "defaultChatBackgroundPreset" to ChatBackgroundPreset.fromKey(defaultChatBackgroundPreset).key,
+            "defaultChatBackgroundImage" to defaultChatBackgroundImage?.trim()?.takeIf { it.isNotBlank() }?.take(350_000),
             "createdAt" to if (isCreate || createdAt == null) FieldValue.serverTimestamp() else createdAt,
             "updatedAt" to FieldValue.serverTimestamp()
         )
@@ -667,7 +671,7 @@ data class StoryHighlight(
             "title" to title.trim().take(40),
             "coverAvatar" to coverAvatar,
             "coverEmoji" to coverEmoji,
-            "items" to items.take(25).map { it.toMap() },
+            "items" to items.map { it.toMap() },
             "isActive" to true,
             "createdAt" to FieldValue.serverTimestamp(),
             "updatedAt" to FieldValue.serverTimestamp()
@@ -813,4 +817,50 @@ data class ChatPreference(
         return raw.filterValues { it != null } as Map<String, Any>
     }
 }
+
+@IgnoreExtraProperties
+data class SharedChatThread(
+    @DocumentId val id: String = "",
+    val threadId: String = "",
+    val participants: List<String> = emptyList(),
+    val nickname: String? = null,
+    val backgroundPreset: String = ChatBackgroundPreset.DEFAULT.key,
+    val backgroundImage: String? = null,
+    val updatedBy: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
+) {
+    fun peerIdFor(currentUid: String): String =
+        participants.firstOrNull { it != currentUid } ?: ""
+
+    fun toChatPreference(currentUid: String): ChatPreference =
+        ChatPreference(
+            id = peerIdFor(currentUid),
+            userId = currentUid,
+            peerId = peerIdFor(currentUid),
+            nickname = nickname,
+            backgroundPreset = backgroundPreset,
+            backgroundImage = backgroundImage,
+            updatedAt = updatedAt
+        )
+
+    fun toWriteMap(): Map<String, Any> {
+        val raw = mutableMapOf<String, Any?>(
+            "threadId" to threadId,
+            "participants" to participants,
+            "nickname" to nickname?.trim()?.takeIf { it.isNotBlank() }?.take(40),
+            "backgroundPreset" to ChatBackgroundPreset.fromKey(backgroundPreset).key,
+            "backgroundImage" to backgroundImage?.trim()?.takeIf { it.isNotBlank() }?.take(350_000),
+            "updatedBy" to updatedBy,
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        @Suppress("UNCHECKED_CAST")
+        return raw.filterValues { it != null } as Map<String, Any>
+    }
+
+    companion object {
+        fun threadIdFor(uidA: String, uidB: String): String =
+            listOf(uidA, uidB).sorted().joinToString("_")
+    }
+}
+
 

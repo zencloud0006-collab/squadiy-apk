@@ -141,6 +141,9 @@ private object ActivePostAudioCoordinator {
     private val _activePostId = MutableStateFlow<String?>(null)
     val activePostId = _activePostId
 
+    private val _isAllPostsMuted = MutableStateFlow(false)
+    val isAllPostsMuted = _isAllPostsMuted
+
     fun requestPlay(postId: String) {
         _activePostId.value = postId
     }
@@ -149,6 +152,10 @@ private object ActivePostAudioCoordinator {
         if (_activePostId.value == postId) {
             _activePostId.value = null
         }
+    }
+
+    fun toggleMuteAll() {
+        _isAllPostsMuted.value = !_isAllPostsMuted.value
     }
 }
 
@@ -252,8 +259,9 @@ fun PostCard(
 
     val postMusicUrl = post.musicPreviewUrl?.takeIf { it.isNotBlank() }
     val activeAudioPostId by ActivePostAudioCoordinator.activePostId.collectAsStateWithLifecycle()
+    val isAllPostsMuted by ActivePostAudioCoordinator.isAllPostsMuted.collectAsStateWithLifecycle()
     var musicPlayer by remember(post.id, postMusicUrl) { mutableStateOf<ExoPlayer?>(null) }
-    var isSongMuted by remember(post.id, postMusicUrl) { mutableStateOf(false) }
+    val isSongMuted = isAllPostsMuted
 
     LaunchedEffect(isAutoPlayActive, post.id, postMusicUrl) {
         val url = postMusicUrl ?: return@LaunchedEffect
@@ -622,6 +630,8 @@ fun PostCard(
                             videoUri = mediaItem,
                             modifier = Modifier.fillMaxSize(),
                             autoPlay = isAutoPlayActive && pagerState.currentPage == page,
+                            forceMuted = isAllPostsMuted,
+                            onToggleMute = { ActivePostAudioCoordinator.toggleMuteAll() },
                             fitVideoToBounds = isFreeRatio,
                             onVideoSizeChanged = { detectedRatio ->
                                 if (isFreeRatio && page == 0) {
@@ -667,7 +677,7 @@ fun PostCard(
                     ?.let { MediaUtils.isVideoMediaUri(it) } == true
                 if (postMusicUrl != null && !currentPageIsVideo) {
                     IconButton(
-                        onClick = { isSongMuted = !isSongMuted },
+                        onClick = { ActivePostAudioCoordinator.toggleMuteAll() },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(10.dp)
@@ -816,7 +826,7 @@ fun PostCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (postMusicUrl != null && (post.images.isEmpty() || compactDiscussion)) {
                     IconButton(
-                        onClick = { isSongMuted = !isSongMuted },
+                        onClick = { ActivePostAudioCoordinator.toggleMuteAll() },
                         modifier = Modifier
                             .minimumInteractiveComponentSize()
                             .testTag("post_music_mute_${post.id}")

@@ -21,6 +21,8 @@ app/build/
 *.ap_
 *.dex
 local.properties
+.env
+!.env.example
 
 # Editor directories and files
 .vscode/*
