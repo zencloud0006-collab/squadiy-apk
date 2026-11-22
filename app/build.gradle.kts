@@ -13,7 +13,24 @@ val blobReadWriteToken: String by lazy {
         Properties().apply { envFile.inputStream().use { load(it) } }.getProperty("BLOB_READ_WRITE_TOKEN")
     } else null
     val raw = fromEnvFile ?: System.getenv("BLOB_READ_WRITE_TOKEN") ?: ""
-    raw.trim().let { if (it == "BLOB_READ_WRITE_TOKEN_PLACEHOLDER") "" else it }
+    raw.trim()
+        .removeSurrounding("\"")
+        .removeSurrounding("'")
+        .trim()
+        .let { if (it == "BLOB_READ_WRITE_TOKEN_PLACEHOLDER") "" else it }
+}
+
+val mediaTokenEndpointUrl: String by lazy {
+    val envFile = rootProject.file(".env")
+    val fromEnvFile = if (envFile.exists()) {
+        Properties().apply { envFile.inputStream().use { load(it) } }.getProperty("MEDIA_TOKEN_ENDPOINT_URL")
+    } else null
+    val fromProp = providers.gradleProperty("MEDIA_TOKEN_ENDPOINT_URL").orNull
+    val raw = fromEnvFile ?: fromProp ?: System.getenv("MEDIA_TOKEN_ENDPOINT_URL") ?: ""
+    raw.trim()
+        .removeSurrounding("\"")
+        .removeSurrounding("'")
+        .trim()
 }
 
 android {
@@ -29,6 +46,7 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "BLOB_READ_WRITE_TOKEN", "\"${blobReadWriteToken.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
+        buildConfigField("String", "MEDIA_TOKEN_ENDPOINT_URL", "\"${mediaTokenEndpointUrl.replace("\\", "\\\\").replace("\"", "\\\"")}\"")
     }
 
     signingConfigs {

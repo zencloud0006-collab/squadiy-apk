@@ -11,6 +11,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Base64
+import android.util.Log
 import android.util.LruCache
 import coil.Coil
 import coil.annotation.ExperimentalCoilApi
@@ -27,8 +28,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -46,10 +50,26 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+class PermanentMediaException(
+    message: String,
+    cause: Throwable? = null
+) : IllegalStateException(message, cause)
+
+data class UploadTargetToken(
+    val pathname: String,
+    val token: String
+)
+
 object CampusMediaRepository {
     private const val VERCEL_BLOB_BASE_URL = "https://blob.vercel-storage.com/"
     private val imageMemoryCache = LruCache<String, ByteArray>(24)
     private val naturalAspectRatioCache = ConcurrentHashMap<String, Float>()
+
+    private fun mediaTokenEndpointUrlOrNull(): String? =
+        BuildConfig.MEDIA_TOKEN_ENDPOINT_URL.trim().takeIf {
+            it.startsWith("https://", ignoreCase = true) ||
+                it.startsWith("http://", ignoreCase = true)
+        }
 
     private fun blobReadWriteTokenOrNull(): String? =
         BuildConfig.BLOB_READ_WRITE_TOKEN.trim().takeIf {
@@ -96,6 +116,122 @@ object CampusMediaRepository {
     private fun mediaCacheDir(context: Context): File =
         File(context.cacheDir, "campus_media").apply { mkdirs() }
 
+    private suspend fun resolveUploadTargets(
+        auth: FirebaseAuth,
+        requests: List<Pair<String, String>>
+    ): Result<List<UploadTargetToken>> = withContext(Dispatchers.IO) {
+        if (requests.isEmpty()) return@withContext Result.success(emptyList())
+
+        val endpoint = mediaTokenEndpointUrlOrNull()
+        if (endpoint != null) {
+            val user = auth.currentUser
+                ?: return@withContext Result.failure(
+                    PermanentMediaException("Sign in required before uploading media.")
+                )
+            var forceRefresh = false
+            for (attempt in 0..1) {
+                val idToken = runCatching { user.getIdToken(forceRefresh).await().token }
+                    .getOrNull()?.takeIf { it.isNotBlank() }
+                    ?: return@withContext Result.failure(
+                        PermanentMediaException("Unable to verify Firebase session for upload.")
+                    )
+
+                val payload = JSONObject().apply {
+                    put("files", JSONArray().apply {
+                        requests.forEach { (pathname, mimeType) ->
+                            put(JSONObject().apply {
+                                put("pathname", pathname)
+                                put("contentType", mimeType)
+                            })
+                        }
+                    })
+                }.toString()
+
+                var conn: HttpURLConnection? = null
+                try {
+                    conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        doOutput = true
+                        doInput = true
+                        useCaches = false
+                        connectTimeout = 8_000
+                        readTimeout = 15_000
+                        setRequestProperty("Authorization", "Bearer $idToken")
+                        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                    }
+                    conn.outputStream.use { it.write(payload.toByteArray(Charsets.UTF_8)) }
+
+                    val code = conn.responseCode
+                    if (code == 401 && attempt == 0) {
+                        forceRefresh = true
+                        continue
+                    }
+
+                    val responseBody = runCatching {
+                        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                        stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    }.getOrDefault("")
+
+                    if (code !in 200..299) {
+                        val errMsg = runCatching {
+                            JSONObject(responseBody).optString("error")
+                        }.getOrDefault("").ifBlank { "Upload token request failed (HTTP $code)" }
+                        val err = if (code in 400..499 && code != 408 && code != 429) {
+                            PermanentMediaException(errMsg)
+                        } else {
+                            IllegalStateException(errMsg)
+                        }
+                        return@withContext Result.failure(err)
+                    }
+
+                    val json = JSONObject(responseBody)
+                    val arr = json.optJSONArray("tokens")
+                    if (arr != null && arr.length() == requests.size) {
+                        val parsed = (0 until arr.length()).map { idx ->
+                            val obj = arr.getJSONObject(idx)
+                            val token = obj.optString("clientToken").trim()
+                            val path = obj.optString("pathname").ifBlank { requests[idx].first }
+                            if (token.isBlank()) {
+                                return@withContext Result.failure(
+                                    PermanentMediaException("Upload backend returned an empty client token.")
+                                )
+                            }
+                            UploadTargetToken(pathname = path, token = token)
+                        }
+                        return@withContext Result.success(parsed)
+                    } else if (requests.size == 1) {
+                        val singleToken = json.optString("clientToken").trim()
+                        val singlePath = json.optString("pathname").ifBlank { requests[0].first }
+                        if (singleToken.isNotBlank()) {
+                            return@withContext Result.success(
+                                listOf(UploadTargetToken(pathname = singlePath, token = singleToken))
+                            )
+                        }
+                    }
+                    return@withContext Result.failure(
+                        PermanentMediaException("Upload backend returned an invalid token payload.")
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    return@withContext Result.failure(
+                        if (t is Exception) t else IllegalStateException(t.message ?: "Token exchange failed", t)
+                    )
+                } finally {
+                    runCatching { conn?.disconnect() }
+                }
+            }
+        }
+
+        val rwToken = blobReadWriteTokenOrNull()
+            ?: return@withContext Result.failure(
+                PermanentMediaException(
+                    "Upload backend not configured. Deploy vercel-backend & set MEDIA_TOKEN_ENDPOINT_URL, or configure BLOB_READ_WRITE_TOKEN in AI Studio Secrets."
+                )
+            )
+        Result.success(requests.map { (path, _) -> UploadTargetToken(pathname = path, token = rwToken) })
+    }
+
     suspend fun uploadPickedMediaUri(
         context: Context,
         uri: Uri,
@@ -109,9 +245,9 @@ object CampusMediaRepository {
 
         val isVideo = MediaUtils.isVideoContentUri(context, uri)
         return if (isVideo) {
-            uploadVideoUri(context, uri, uid, isAdmin, db, onProgress)
+            uploadVideoUri(context, uri, uid, isAdmin, db, auth, onProgress)
         } else {
-            uploadImageUri(context, uri, uid, isAdmin, db, onProgress)
+            uploadImageUri(context, uri, uid, isAdmin, db, auth, onProgress)
         }
     }
 
@@ -133,6 +269,152 @@ object CampusMediaRepository {
         onProgress = onProgress
     )
 
+    private data class PreparedStagedUpload(
+        val index: Int,
+        val isVideo: Boolean,
+        val fileUri: Uri,
+        val desiredPath: String,
+        val mimeType: String,
+        val totalBytes: Long,
+        val compressedBytes: ByteArray?,
+        val videoFile: File?
+    )
+
+    suspend fun uploadStagedMediaBatch(
+        context: Context,
+        stagedItems: List<Pair<File, Boolean>>,
+        auth: FirebaseAuth = Firebase.auth,
+        onProgress: (Float) -> Unit = {}
+    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        if (stagedItems.isEmpty()) return@withContext Result.success(emptyList())
+        val uid = auth.currentUser?.uid
+            ?: return@withContext Result.failure(PermanentMediaException("Sign in required before uploading media."))
+
+        onProgress(0.04f)
+        val prepared = try {
+            coroutineScope {
+                stagedItems.mapIndexed { index, (file, isVideo) ->
+                    async(Dispatchers.IO) {
+                        if (!file.exists()) {
+                            throw IllegalArgumentException("Selected media file is missing.")
+                        }
+                        val fileUri = Uri.fromFile(file)
+                        if (isVideo) {
+                            val totalBytes = file.length()
+                            if (totalBytes <= 0L) {
+                                throw IllegalArgumentException("Selected video file is empty.")
+                            }
+                            PreparedStagedUpload(
+                                index = index,
+                                isVideo = true,
+                                fileUri = fileUri,
+                                desiredPath = "campus/$uid/videos/vid_${UUID.randomUUID()}.mp4",
+                                mimeType = "video/mp4",
+                                totalBytes = totalBytes,
+                                compressedBytes = null,
+                                videoFile = file
+                            )
+                        } else {
+                            val bytes = MediaUtils.compressUriToJpegBytes(
+                                context = context,
+                                uri = fileUri,
+                                maxDimension = 1600,
+                                quality = 86
+                            ) ?: throw IllegalArgumentException("Unable to read selected photo.")
+                            PreparedStagedUpload(
+                                index = index,
+                                isVideo = false,
+                                fileUri = fileUri,
+                                desiredPath = "campus/$uid/images/img_${UUID.randomUUID()}.jpg",
+                                mimeType = "image/jpeg",
+                                totalBytes = bytes.size.toLong(),
+                                compressedBytes = bytes,
+                                videoFile = null
+                            )
+                        }
+                    }
+                }.awaitAll()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            return@withContext Result.failure(t)
+        }
+
+        onProgress(0.14f)
+        val targets = resolveUploadTargets(
+            auth = auth,
+            requests = prepared.map { it.desiredPath to it.mimeType }
+        ).getOrElse { return@withContext Result.failure(it) }
+
+        onProgress(0.18f)
+        val itemProgress = FloatArray(prepared.size)
+        val progressLock = Any()
+        val semaphore = Semaphore(3)
+
+        val uploadedUrls = try {
+            coroutineScope {
+                prepared.mapIndexed { idx, item ->
+                    async(Dispatchers.IO) {
+                        semaphore.withPermit {
+                            val target = targets[idx]
+                            val uploadRes = putStreamToVercelBlob(
+                                token = target.token,
+                                fileName = target.pathname,
+                                mimeType = item.mimeType,
+                                totalBytes = item.totalBytes,
+                                openStream = {
+                                    if (item.compressedBytes != null) {
+                                        item.compressedBytes.inputStream()
+                                    } else {
+                                        BufferedInputStream(FileInputStream(item.videoFile!!), 65_536)
+                                    }
+                                },
+                                onProgress = { pct ->
+                                    synchronized(progressLock) {
+                                        itemProgress[idx] = pct.coerceIn(0f, 1f)
+                                        val avg = itemProgress.sum() / itemProgress.size.toFloat()
+                                        onProgress((0.18f + avg * 0.80f).coerceIn(0.18f, 0.98f))
+                                    }
+                                }
+                            )
+                            val rawUrl = uploadRes.getOrThrow()
+                            if (item.isVideo) {
+                                val finalUrl = if (MediaUtils.isVideoMediaUri(rawUrl)) {
+                                    rawUrl
+                                } else {
+                                    "$rawUrl${MediaUtils.VIDEO_URL_FRAGMENT}"
+                                }
+                                val thumbBytes = MediaUtils.extractVideoThumbnailDataUrl(context, item.fileUri)
+                                    ?.let { MediaUtils.decodeDataUriBytes(it) }
+                                if (thumbBytes != null && thumbBytes.isNotEmpty()) {
+                                    val key = sha256Hex(finalUrl)
+                                    imageMemoryCache.put(key, thumbBytes)
+                                    runCatching { File(mediaCacheDir(context), "${key}_vthumb.jpg").writeBytes(thumbBytes) }
+                                }
+                                finalUrl
+                            } else {
+                                item.compressedBytes?.let { bytes ->
+                                    val key = sha256Hex(rawUrl)
+                                    imageMemoryCache.put(key, bytes)
+                                    runCatching { File(mediaCacheDir(context), "$key.jpg").writeBytes(bytes) }
+                                }
+                                rawUrl
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            return@withContext Result.failure(t)
+        }
+
+        onProgress(1f)
+        Result.success(uploadedUrls)
+    }
+
     suspend fun uploadStagedMediaFile(
         context: Context,
         file: File,
@@ -141,46 +423,15 @@ object CampusMediaRepository {
         db: FirebaseFirestore = getDb(context),
         auth: FirebaseAuth = Firebase.auth,
         onProgress: (Float) -> Unit = {}
-    ): Result<String> {
-        auth.currentUser?.uid
-            ?: return Result.failure(IllegalStateException("Sign in required before uploading media."))
-        val token = blobReadWriteTokenOrNull()
-            ?: return Result.failure(IllegalStateException("Cloud storage token missing. Configure BLOB_READ_WRITE_TOKEN in AI Studio Secrets."))
-
-        val fileUri = Uri.fromFile(file)
-        return if (isVideo) {
-            if (!file.exists()) {
-                return Result.failure(IllegalArgumentException("Selected video file is missing."))
-            }
-            val totalBytes = file.length()
-            if (totalBytes <= 0L) {
-                return Result.failure(IllegalArgumentException("Selected video file is empty."))
-            }
-            val fileName = "campus/videos/vid_${UUID.randomUUID()}.mp4"
-            val result = putStreamToVercelBlob(
-                token = token,
-                fileName = fileName,
-                mimeType = "video/mp4",
-                totalBytes = totalBytes,
-                openStream = { BufferedInputStream(FileInputStream(file), 65_536) },
-                onProgress = onProgress
-            ).map { rawUrl ->
-                if (MediaUtils.isVideoMediaUri(rawUrl)) rawUrl else "$rawUrl${MediaUtils.VIDEO_URL_FRAGMENT}"
-            }
-            result.getOrNull()?.let { uploadedUrl ->
-                val thumbBytes = MediaUtils.extractVideoThumbnailDataUrl(context, fileUri)
-                    ?.let { MediaUtils.decodeDataUriBytes(it) }
-                if (thumbBytes != null && thumbBytes.isNotEmpty()) {
-                    val key = sha256Hex(uploadedUrl)
-                    imageMemoryCache.put(key, thumbBytes)
-                    runCatching { File(mediaCacheDir(context), "${key}_vthumb.jpg").writeBytes(thumbBytes) }
-                }
-            }
-            result
-        } else {
-            uploadImageUri(context, fileUri, token, isAdmin, onProgress)
+    ): Result<String> =
+        uploadStagedMediaBatch(
+            context = context,
+            stagedItems = listOf(file to isVideo),
+            auth = auth,
+            onProgress = onProgress
+        ).map { urls ->
+            urls.firstOrNull() ?: throw IllegalStateException("Upload returned empty URL.")
         }
-    }
 
     private suspend fun uploadImageUri(
         context: Context,
@@ -188,18 +439,7 @@ object CampusMediaRepository {
         uid: String,
         isAdmin: Boolean,
         db: FirebaseFirestore,
-        onProgress: (Float) -> Unit
-    ): Result<String> {
-        val token = blobReadWriteTokenOrNull()
-            ?: return Result.failure(IllegalStateException("Cloud storage token missing. Configure BLOB_READ_WRITE_TOKEN in AI Studio Secrets."))
-        return uploadImageUri(context, uri, token, isAdmin, onProgress)
-    }
-
-    private suspend fun uploadImageUri(
-        context: Context,
-        uri: Uri,
-        token: String,
-        isAdmin: Boolean,
+        auth: FirebaseAuth,
         onProgress: (Float) -> Unit
     ): Result<String> {
         onProgress(0.15f)
@@ -209,16 +449,21 @@ object CampusMediaRepository {
             maxDimension = 1600,
             quality = 86
         ) ?: return Result.failure(IllegalArgumentException("Unable to read selected photo."))
-        onProgress(0.30f)
+        onProgress(0.25f)
 
-        val fileName = "campus/images/img_${UUID.randomUUID()}.jpg"
+        val desiredPath = "campus/$uid/images/img_${UUID.randomUUID()}.jpg"
+        val target = resolveUploadTargets(auth, listOf(desiredPath to "image/jpeg"))
+            .getOrElse { return Result.failure(it) }
+            .first()
+        onProgress(0.32f)
+
         val res = putStreamToVercelBlob(
-            token = token,
-            fileName = fileName,
+            token = target.token,
+            fileName = target.pathname,
             mimeType = "image/jpeg",
             totalBytes = bytes.size.toLong(),
             openStream = { bytes.inputStream() },
-            onProgress = { pct -> onProgress((0.30f + pct * 0.70f).coerceIn(0.30f, 1f)) }
+            onProgress = { pct -> onProgress((0.32f + pct * 0.68f).coerceIn(0.32f, 1f)) }
         )
         res.getOrNull()?.let { uploadedUrl ->
             val key = sha256Hex(uploadedUrl)
@@ -234,11 +479,9 @@ object CampusMediaRepository {
         uid: String,
         isAdmin: Boolean,
         db: FirebaseFirestore,
+        auth: FirebaseAuth,
         onProgress: (Float) -> Unit
     ): Result<String> = withContext(Dispatchers.IO) {
-        val token = blobReadWriteTokenOrNull()
-            ?: return@withContext Result.failure(IllegalStateException("Cloud storage token missing. Configure BLOB_READ_WRITE_TOKEN in AI Studio Secrets."))
-
         onProgress(0.03f)
         val mimeType = context.contentResolver.getType(uri)?.take(80) ?: "video/mp4"
         val ext = when {
@@ -247,6 +490,10 @@ object CampusMediaRepository {
             mimeType.contains("x-matroska") || mimeType.contains("mkv") -> "mkv"
             else -> "mp4"
         }
+        val desiredPath = "campus/$uid/videos/vid_${UUID.randomUUID()}.$ext"
+        val target = resolveUploadTargets(auth, listOf(desiredPath to mimeType))
+            .getOrElse { return@withContext Result.failure(it) }
+            .first()
         val knownSize = queryUriByteSize(context, uri)
         var tempStagedFile: File? = null
         try {
@@ -268,10 +515,9 @@ object CampusMediaRepository {
                 opener = { BufferedInputStream(FileInputStream(tmp), 65_536) }
             }
 
-            val fileName = "campus/videos/vid_${UUID.randomUUID()}.$ext"
             val result = putStreamToVercelBlob(
-                token = token,
-                fileName = fileName,
+                token = target.token,
+                fileName = target.pathname,
                 mimeType = mimeType,
                 totalBytes = streamSize,
                 openStream = opener,
@@ -341,7 +587,9 @@ object CampusMediaRepository {
                 setRequestProperty("x-api-version", "7")
                 setRequestProperty("x-vercel-blob-access", "public")
                 setRequestProperty("x-content-type", mimeType)
-                setRequestProperty("x-add-random-suffix", "1")
+                if (!token.startsWith("vercel_blob_client_")) {
+                    setRequestProperty("x-add-random-suffix", "1")
+                }
                 setRequestProperty("Content-Type", mimeType)
                 if (totalBytes > 0L) {
                     setFixedLengthStreamingMode(totalBytes)
@@ -383,13 +631,24 @@ object CampusMediaRepository {
             }.getOrDefault("")
 
             if (code !in 200..299) {
-                val errMsg = runCatching {
+                val parsed = runCatching {
                     val json = JSONObject(responseBody)
                     json.optJSONObject("error")?.optString("message").orEmpty()
                         .ifBlank { json.optString("error") }
                         .ifBlank { json.optString("message") }
-                }.getOrDefault("").ifBlank { "Upload failed (HTTP $code)" }
-                return@withContext Result.failure(IllegalStateException(errMsg))
+                }.getOrDefault("").trim()
+                val errMsg = when {
+                    parsed.isBlank() -> "Upload failed (HTTP $code)"
+                    parsed.contains(code.toString()) -> parsed
+                    else -> "$parsed (HTTP $code)"
+                }
+                Log.e("CampusMediaRepository", "Vercel Blob PUT failed: $errMsg")
+                val err = if (code in 400..499 && code != 408 && code != 429) {
+                    PermanentMediaException(errMsg)
+                } else {
+                    IllegalStateException(errMsg)
+                }
+                return@withContext Result.failure(err)
             }
 
             val blobUrl = runCatching { JSONObject(responseBody).optString("url") }.getOrDefault("").trim()

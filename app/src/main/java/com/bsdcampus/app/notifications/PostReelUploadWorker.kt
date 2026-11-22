@@ -16,6 +16,7 @@ import androidx.work.workDataOf
 import com.bsdcampus.app.R
 import com.bsdcampus.app.data.CampusMediaRepository
 import com.bsdcampus.app.data.CampusRepository
+import com.bsdcampus.app.data.PermanentMediaException
 import com.bsdcampus.app.data.StoryMusicTrack
 import com.bsdcampus.app.firebase.configureAppCheck
 import com.bsdcampus.app.model.CampusUser
@@ -102,50 +103,44 @@ class PostReelUploadWorker(
                 return failAndCleanup(uploadId, kind, stagedFiles, "Suspended accounts cannot publish.")
             }
 
-            val uploadedUrls = mutableListOf<String>()
             val totalFiles = stagedFiles.size.coerceAtLeast(1)
+            val initialLabel = when {
+                kind == MediaUploadKind.REEL -> "Uploading reel video..."
+                totalFiles > 1 -> "Uploading $totalFiles media items..."
+                isVideos.firstOrNull() == true -> "Uploading post video..."
+                else -> "Uploading post photo..."
+            }
+            MediaUploadTracker.updateProgress(uploadId, 0.12f, initialLabel)
 
-            for ((index, stagedFile) in stagedFiles.withIndex()) {
-                val fileIsVideo = isVideos.getOrElse(index) { false }
-                val baseProgress = 0.12f + (index.toFloat() / totalFiles.toFloat()) * 0.78f
-                val stepRange = (0.78f / totalFiles.toFloat())
-                val itemLabel = if (kind == MediaUploadKind.REEL) {
-                    "Uploading reel video..."
-                } else if (totalFiles > 1) {
-                    "Uploading media ${index + 1}/$totalFiles..."
-                } else {
-                    if (fileIsVideo) "Uploading post video..." else "Uploading post photo..."
+            val stagedPairs = stagedFiles.mapIndexed { idx, file ->
+                file to isVideos.getOrElse(idx) { false }
+            }
+            val uploadedUrls = CampusMediaRepository.uploadStagedMediaBatch(
+                context = applicationContext,
+                stagedItems = stagedPairs,
+                auth = auth,
+                onProgress = { p ->
+                    val scaled = 0.12f + p.coerceIn(0f, 1f) * 0.78f
+                    val pct = (scaled * 100).toInt().coerceIn(1, 99)
+                    val kindWord = if (kind == MediaUploadKind.REEL) "reel" else "post"
+                    MediaUploadTracker.updateProgress(uploadId, scaled, "Uploading $kindWord... $pct%")
                 }
-                MediaUploadTracker.updateProgress(uploadId, baseProgress, itemLabel)
-
-                val uploadRes = CampusMediaRepository.uploadStagedMediaFile(
-                    context = applicationContext,
-                    file = stagedFile,
-                    isVideo = fileIsVideo,
-                    isAdmin = isAdmin,
-                    db = db,
-                    auth = auth,
-                    onProgress = { p ->
-                        val scaled = baseProgress + p.coerceIn(0f, 1f) * stepRange
-                        val pct = (scaled * 100).toInt().coerceIn(1, 99)
-                        val kindWord = if (kind == MediaUploadKind.REEL) "reel" else "post"
-                        MediaUploadTracker.updateProgress(uploadId, scaled, "Uploading $kindWord... $pct%")
-                    }
-                )
-
-                val uploadedUrl = uploadRes.getOrElse { err ->
-                    if (!isPermanentError(err) && runAttemptCount < 2) {
-                        MediaUploadTracker.updateProgress(uploadId, 0.15f, "Retrying upload...")
-                        return Result.retry()
-                    }
-                    return failAndCleanup(
+            ).getOrElse { err ->
+                Log.w(TAG, "Media upload attempt ${runAttemptCount + 1} failed: ${err.message}", err)
+                if (!isPermanentError(err) && runAttemptCount < 2) {
+                    MediaUploadTracker.updateProgress(
                         uploadId,
-                        kind,
-                        stagedFiles,
-                        err.localizedMessage ?: "Failed to upload media."
+                        0.15f,
+                        "Retrying upload (${runAttemptCount + 1}/2)..."
                     )
+                    return Result.retry()
                 }
-                uploadedUrls.add(uploadedUrl)
+                return failAndCleanup(
+                    uploadId,
+                    kind,
+                    stagedFiles,
+                    err.localizedMessage ?: "Failed to upload media."
+                )
             }
 
             MediaUploadTracker.updateProgress(
@@ -235,9 +230,18 @@ class PostReelUploadWorker(
         var cur: Throwable? = t
         while (cur != null) {
             when (cur) {
+                is PermanentMediaException,
                 is IllegalArgumentException,
                 is SecurityException,
                 is OutOfMemoryError -> return true
+                is IllegalStateException -> {
+                    val msg = cur.message.orEmpty()
+                    if (msg.contains("token missing", ignoreCase = true) ||
+                        msg.contains("Sign in required", ignoreCase = true)
+                    ) {
+                        return true
+                    }
+                }
                 is FirebaseFirestoreException -> {
                     if (cur.code == FirebaseFirestoreException.Code.PERMISSION_DENIED ||
                         cur.code == FirebaseFirestoreException.Code.INVALID_ARGUMENT ||

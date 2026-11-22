@@ -16,6 +16,7 @@ import androidx.work.workDataOf
 import com.bsdcampus.app.R
 import com.bsdcampus.app.data.CampusMediaRepository
 import com.bsdcampus.app.data.CampusRepository
+import com.bsdcampus.app.data.PermanentMediaException
 import com.bsdcampus.app.data.StoryMusicTrack
 import com.bsdcampus.app.firebase.configureAppCheck
 import com.bsdcampus.app.model.CampusUser
@@ -105,8 +106,13 @@ class StoryUploadWorker(
             )
 
             val mediaUrl = uploadRes.getOrElse { err ->
+                Log.w(TAG, "Story upload attempt ${runAttemptCount + 1} failed: ${err.message}", err)
                 if (!isPermanentError(err) && runAttemptCount < 2) {
-                    StoryUploadTracker.updateProgress(uploadId, 0.15f, "Retrying story upload...")
+                    StoryUploadTracker.updateProgress(
+                        uploadId,
+                        0.15f,
+                        "Retrying story upload (${runAttemptCount + 1}/2)..."
+                    )
                     return Result.retry()
                 }
                 return failAndCleanup(uploadId, stagedFile, err.localizedMessage ?: "Failed to upload story media.")
@@ -173,9 +179,18 @@ class StoryUploadWorker(
         var cur: Throwable? = t
         while (cur != null) {
             when (cur) {
+                is PermanentMediaException,
                 is IllegalArgumentException,
                 is SecurityException,
                 is OutOfMemoryError -> return true
+                is IllegalStateException -> {
+                    val msg = cur.message.orEmpty()
+                    if (msg.contains("token missing", ignoreCase = true) ||
+                        msg.contains("Sign in required", ignoreCase = true)
+                    ) {
+                        return true
+                    }
+                }
                 is FirebaseFirestoreException -> {
                     if (cur.code == FirebaseFirestoreException.Code.PERMISSION_DENIED ||
                         cur.code == FirebaseFirestoreException.Code.INVALID_ARGUMENT ||
